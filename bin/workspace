@@ -39,8 +39,10 @@ art_pane=$(tmux split-window -v -l 30% -t "$btop_pane" -c "$HOME" -P -F '#{pane_
 tmux send-keys -t "$btop_pane" 'btop' Enter
 tmux send-keys -t "$art_pane" 'home-art' Enter
 
-# Tab 2: dev
-DEV_SESSION=$SESSION dev "$HOME"
+# Tab 2: dev. Starts as a project picker; picking a folder builds the
+# claude/tree/terminal layout there (Esc keeps home).
+dev_pane=$(tmux new-window -t "$SESSION:" -n dev -c "$HOME" -P -F '#{pane_id}')
+tmux send-keys -t "$dev_pane" 'dev --pick --here' Enter
 
 tmux select-window -t "$SESSION:home"
 tmux select-pane -t "$term_pane"

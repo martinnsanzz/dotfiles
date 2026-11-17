@@ -42,7 +42,7 @@ Then open Ghostty (`open -a Ghostty`). `./install.sh links` only re-creates the 
 
 1. `ghostty/config` sets `command = .../workspace`, so every Ghostty window runs that script instead of a plain shell. `macos-option-as-alt` makes the Option key work for tmux shortcuts, and `background-opacity` makes the window see-through.
 2. `bin/workspace` creates the tmux session `main` with the home tab, then calls `bin/dev` to add the dev tab. If `main` already exists, it reattaches instead. That's why closing Ghostty loses nothing.
-3. `bin/dev [folder]` builds a claude/tree/terminal tab. `dev --pick` shows an fzf list of `~` and the folders in `~/Projects` first.
+3. `bin/dev [folder]` builds a claude/tree/terminal tab. `dev --pick` shows an fzf list of `~` and the folders in `~/Projects` first. The startup dev tab opens on this picker (Esc keeps home).
 4. `bin/home-art` picks a random file from `art/` and draws it centered, next to the main shortcuts. It redraws when the pane is resized.
 5. `btop/btop.conf` limits btop to CPU and memory and sets `save_config_on_exit = false`, so btop never rewrites the file in the repo.
 6. yazi's `edit` opener (`yazi/yazi.toml`) runs vim inside the yazi pane. Quitting vim brings the tree back.
