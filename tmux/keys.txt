@@ -1,0 +1,44 @@
+ SHORTCUTS  (Option = ⌥)                    q closes this
+
+ TABS
+   Option+1..9        go to tab 1..9
+   Option+t           new shell tab
+   Option+d           new dev tab (pick a project)
+   Option+r           rename tab
+   Option+Shift+w     close tab
+
+ PANES
+   Option+h/j/k/l     move left/down/up/right
+   Option+arrows      move (same as above)
+   Option+Shift+h/j/k/l  resize
+   Option+z           zoom pane to full tab (toggle)
+   Option+v           split side by side
+   Option+s           split top/bottom
+   Option+w           close pane
+
+ SCROLLING / COPY
+   Option+u           scroll up into history
+   j/k  Ctrl+u/d      move / page in history
+   v then y           select, copy to clipboard
+   q                  back to normal
+
+ HOME TAB ART
+   r                  new random art (art pane focused)
+   q                  quit to shell (type home-art to restart)
+
+ YAZI (file tree)
+   j/k  h/l           down/up, parent/enter folder
+   Enter              open file in vim
+   a  r  d            create, rename, trash
+   Space  y  x  p     select, copy, cut, paste
+   .                  show/hide hidden files
+
+ VIM
+   i  Esc             type / stop typing
+   :w  :q  :wq  :q!   save, quit, both, quit without saving
+   u  Ctrl+r          undo / redo
+
+ OTHER
+   Ctrl+b r           reload tmux config
+   Ctrl+b d           detach (session keeps running)
+   Cmd+Shift+r        reload Ghostty config

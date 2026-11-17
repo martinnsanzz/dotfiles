@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Opens a dev tab in tmux:
+#
+#   ┌──────────────┬──────────────┐
+#   │              │  yazi tree   │
+#   │   claude     │ (Enter→vim)  │
+#   │              ├──────────────┤
+#   │              │ fish terminal│
+#   └──────────────┴──────────────┘
+#
+# Usage: dev [dir]     open a dev tab in dir (default: current folder)
+#        dev --pick    choose a folder with fzf first (bound to Option+d)
+# DEV_SESSION=name adds the tab to that session instead of the current one.
+
+export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
+
+pick() {
+	{
+		echo "$HOME"
+		find "$HOME/Projects" -mindepth 1 -maxdepth 2 -type d -not -path '*/.*' 2>/dev/null
+	} | sed "s|^$HOME|~|" |
+		fzf --prompt='project> ' --reverse --height=100% |
+		sed "s|^~|$HOME|"
+}
+
+if [ "${1:-}" = --pick ]; then
+	dir=$(pick)
+	[ -n "$dir" ] || exit 0
+else
+	dir=${1:-$PWD}
+fi
+
+name=$(basename "$dir")
+[ "$dir" = "$HOME" ] && name=dev
+
+claude_pane=$(tmux new-window ${DEV_SESSION:+-t "$DEV_SESSION:"} -n "$name" -c "$dir" -P -F '#{pane_id}')
+tree_pane=$(tmux split-window -h -l 50% -t "$claude_pane" -c "$dir" -P -F '#{pane_id}')
+tmux split-window -v -l 40% -t "$tree_pane" -c "$dir"
+
+# send-keys (instead of running the program as the pane command) means quitting
+# claude or yazi drops back to a shell rather than closing the pane.
+tmux send-keys -t "$claude_pane" 'claude' Enter
+tmux send-keys -t "$tree_pane" 'yazi' Enter
+tmux select-pane -t "$claude_pane"

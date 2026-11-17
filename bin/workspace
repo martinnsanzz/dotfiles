@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 # Launched by Ghostty on every new window. Builds (or reattaches to) the
-# tmux session "main":
+# tmux session "main" with two tabs:
 #
-#   ┌──────────────┬──────────────┐
-#   │              │  yazi tree   │
-#   │   claude     │ (Enter→vim)  │
-#   │              ├──────────────┤
-#   │              │ fish terminal│
-#   └──────────────┴──────────────┘
+#   1:home                              2:dev (see bin/dev)
+#   ┌──────────────┬──────────────┐     ┌──────────────┬──────────────┐
+#   │  btop        │              │     │              │  yazi tree   │
+#   │  (CPU/RAM)   │              │     │   claude     │              │
+#   ├──────────────┤   terminal   │     │              ├──────────────┤
+#   │  ASCII art   │              │     │              │   terminal   │
+#   │  + sys info  │              │     │              │              │
+#   └──────────────┴──────────────┘     └──────────────┴──────────────┘
 
 # Apps launched from the Dock don't get Homebrew on PATH.
 export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
@@ -21,7 +23,7 @@ fi
 
 if tmux has-session -t "$SESSION" 2>/dev/null; then
 	if [ -n "$(tmux list-clients -t "$SESSION" 2>/dev/null)" ]; then
-		# Another Ghostty window is already attached: join the same windows
+		# Another Ghostty window is already attached: join the same tabs
 		# through a grouped session that disappears when this window closes.
 		exec tmux new-session -t "$SESSION" \; set-option destroy-unattached on
 	fi
@@ -30,14 +32,16 @@ fi
 
 cd "$HOME" || exit 1
 
-claude_pane=$(tmux new-session -d -s "$SESSION" -n code -c "$HOME" -P -F '#{pane_id}')
-tree_pane=$(tmux split-window -h -l 50% -t "$claude_pane" -c "$HOME" -P -F '#{pane_id}')
-tmux split-window -v -l 40% -t "$tree_pane" -c "$HOME"
+# Tab 1: home
+btop_pane=$(tmux new-session -d -s "$SESSION" -n home -c "$HOME" -P -F '#{pane_id}')
+term_pane=$(tmux split-window -h -l 50% -t "$btop_pane" -c "$HOME" -P -F '#{pane_id}')
+art_pane=$(tmux split-window -v -l 50% -t "$btop_pane" -c "$HOME" -P -F '#{pane_id}')
+tmux send-keys -t "$btop_pane" 'btop' Enter
+tmux send-keys -t "$art_pane" 'home-art' Enter
 
-# send-keys (instead of running the program as the pane command) means quitting
-# claude or yazi drops back to a shell rather than closing the pane.
-tmux send-keys -t "$claude_pane" 'claude' Enter
-tmux send-keys -t "$tree_pane" 'yazi' Enter
+# Tab 2: dev
+DEV_SESSION=$SESSION dev "$HOME"
 
-tmux select-pane -t "$claude_pane"
+tmux select-window -t "$SESSION:home"
+tmux select-pane -t "$term_pane"
 exec tmux attach-session -t "$SESSION"

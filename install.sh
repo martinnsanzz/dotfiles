@@ -13,7 +13,7 @@ install_tools() {
 	if [ ! -d /Applications/Ghostty.app ]; then
 		brew install --cask ghostty
 	fi
-	for pkg in tmux yazi fish; do
+	for pkg in tmux yazi fish btop fastfetch fzf; do
 		brew list --formula "$pkg" >/dev/null 2>&1 || brew install "$pkg"
 	done
 }
@@ -38,10 +38,14 @@ link() {
 link_configs() {
 	link ghostty/config   "$HOME/.config/ghostty/config"
 	link tmux/tmux.conf   "$HOME/.config/tmux/tmux.conf"
+	link tmux/keys.txt    "$HOME/.config/tmux/keys.txt"
 	link yazi/yazi.toml   "$HOME/.config/yazi/yazi.toml"
+	link fastfetch/config.jsonc "$HOME/.config/fastfetch/config.jsonc"
 	link vim/vimrc        "$HOME/.vimrc"
-	chmod +x "$DOTFILES/bin/workspace"
-	link bin/workspace    "$HOME/.local/bin/workspace"
+	for script in "$DOTFILES"/bin/*; do
+		chmod +x "$script"
+		link "bin/$(basename "$script")" "$HOME/.local/bin/$(basename "$script")"
+	done
 }
 
 case "${1:-all}" in
