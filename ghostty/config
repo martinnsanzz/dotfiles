@@ -15,6 +15,9 @@ background-blur = 20
 
 # Let Option act as Alt so tmux's Alt+arrow pane switching works
 macos-option-as-alt = true
+# Ghostty maps Option+←/→ to word-jump by default; pass them to tmux instead
+keybind = alt+arrow_left=unbind
+keybind = alt+arrow_right=unbind
 
 # Closing a window only detaches tmux, so no need to confirm
 confirm-close-surface = false
