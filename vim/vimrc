@@ -1,0 +1,46 @@
+" Plain vim, no plugins
+
+set nocompatible
+syntax on
+filetype plugin indent on
+
+" Display
+set number
+set ruler
+set showcmd
+set scrolloff=5
+set laststatus=2
+if has('termguicolors')
+  set termguicolors
+endif
+
+" Editing
+set expandtab
+set tabstop=4
+set shiftwidth=4
+set softtabstop=4
+set autoindent
+set backspace=indent,eol,start
+set clipboard=unnamed          " yank/paste uses the macOS clipboard
+
+" Search
+set incsearch
+set hlsearch
+set ignorecase
+set smartcase
+
+" Mouse (works inside tmux too)
+set mouse=a
+if !has('nvim')
+  set ttymouse=sgr
+endif
+
+" Misc
+set hidden
+set wildmenu
+set encoding=utf-8
+set noswapfile
+
+" Space then h clears search highlighting
+let mapleader = " "
+nnoremap <leader>h :nohlsearch<CR>

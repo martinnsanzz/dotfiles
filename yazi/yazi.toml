@@ -1,0 +1,12 @@
+# yazi as the file tree in the top-right pane
+
+[mgr]
+ratio = [1, 3, 0]      # parent + current folder, no preview column (narrow pane)
+sort_dir_first = true
+show_hidden = true
+
+# Enter on a text file opens vim in this same pane; :q returns to the tree.
+[opener]
+edit = [
+	{ run = 'vim %s', block = true, desc = "vim" },
+]

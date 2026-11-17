@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Launched by Ghostty on every new window. Builds (or reattaches to) the
+# tmux session "main":
+#
+#   ┌──────────────┬──────────────┐
+#   │              │  yazi tree   │
+#   │   claude     │ (Enter→vim)  │
+#   │              ├──────────────┤
+#   │              │ fish terminal│
+#   └──────────────┴──────────────┘
+
+# Apps launched from the Dock don't get Homebrew on PATH.
+export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
+
+SESSION=main
+
+# No tmux? Still give Ghostty a usable shell.
+if ! command -v tmux >/dev/null 2>&1; then
+	exec "$(command -v fish || echo /bin/zsh)" -l
+fi
+
+if tmux has-session -t "$SESSION" 2>/dev/null; then
+	if [ -n "$(tmux list-clients -t "$SESSION" 2>/dev/null)" ]; then
+		# Another Ghostty window is already attached: join the same windows
+		# through a grouped session that disappears when this window closes.
+		exec tmux new-session -t "$SESSION" \; set-option destroy-unattached on
+	fi
+	exec tmux attach-session -t "$SESSION"
+fi
+
+cd "$HOME" || exit 1
+
+claude_pane=$(tmux new-session -d -s "$SESSION" -n code -c "$HOME" -P -F '#{pane_id}')
+tree_pane=$(tmux split-window -h -l 50% -t "$claude_pane" -c "$HOME" -P -F '#{pane_id}')
+tmux split-window -v -l 40% -t "$tree_pane" -c "$HOME"
+
+# send-keys (instead of running the program as the pane command) means quitting
+# claude or yazi drops back to a shell rather than closing the pane.
+tmux send-keys -t "$claude_pane" 'claude' Enter
+tmux send-keys -t "$tree_pane" 'yazi' Enter
+
+tmux select-pane -t "$claude_pane"
+exec tmux attach-session -t "$SESSION"

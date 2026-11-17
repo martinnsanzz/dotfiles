@@ -1,0 +1,18 @@
+# Ghostty config — reload with Cmd+Shift+R
+# Every new window starts (or reattaches to) the tmux workspace.
+command = shell:$HOME/.local/bin/workspace
+
+# Appearance
+theme = Catppuccin Mocha
+font-size = 14
+window-padding-x = 6
+window-padding-y = 4
+window-padding-balance = true
+
+# Let Option act as Alt so tmux's Alt+arrow pane switching works
+macos-option-as-alt = true
+
+# Closing a window only detaches tmux, so no need to confirm
+confirm-close-surface = false
+
+keybind = cmd+shift+r=reload_config
