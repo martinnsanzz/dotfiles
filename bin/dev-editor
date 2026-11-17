@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# The right pane of a developer tab (see bin/dev). Until a file is picked in
+# the tree it shows a "waiting for a file" screen; bin/yazi-vim then restarts
+# this pane as `dev-editor <file>`. Quitting nvim brings the waiting screen back.
+#
+# nvim listens on a socket named after this pane, so bin/yazi-vim can hand it
+# later files with `nvim --server <socket> --remote <file>`.
+#
+# Usage: dev-editor [file]
+
+export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
+
+if [ -n "${1:-}" ]; then
+	sock="${TMPDIR:-/tmp/}nvim-dev-${TMUX_PANE#%}.sock"
+	rm -f "$sock"
+	nvim --listen "$sock" -- "$1"
+fi
+
+TITLE=$'\e[1;34m' DIM=$'\e[38;5;245m' RESET=$'\e[0m'
+title="waiting for a file"
+hint="pick one in the tree (Enter or click)"
+
+# Centers the two lines; lengths are counted without the color codes.
+draw() {
+	local cols lines top
+	cols=$(tput cols) lines=$(tput lines)
+	top=$(((lines - 3) / 2))
+	[ $top -lt 0 ] && top=0
+	clear
+	for ((i = 0; i < top; i++)); do echo; done
+	printf '%*s%s%s%s\n\n' $(((cols - ${#title}) / 2)) '' "$TITLE" "$title" "$RESET"
+	printf '%*s%s%s%s\n' $(((cols - ${#hint}) / 2)) '' "$DIM" "$hint" "$RESET"
+}
+
+tput civis
+trap 'tput cnorm' EXIT
+# Ctrl+c shouldn't close the pane; Option+w still does.
+trap '' INT
+
+draw
+size="$(tput cols)x$(tput lines)"
+while true; do
+	# Swallow keypresses so they don't print over the message.
+	read -rsn1 -t 1 _
+	now="$(tput cols)x$(tput lines)"
+	if [ "$now" != "$size" ]; then
+		size=$now
+		draw
+	fi
+done

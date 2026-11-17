@@ -5,8 +5,9 @@ ratio = [1, 3, 0]      # parent + current folder, no preview column (narrow pane
 sort_dir_first = true
 show_hidden = true
 
-# Enter on a text file opens vim in this same pane; :q returns to the tree.
+# Enter and clicks go through plugins/open-vim.yazi instead (instant).
+# This opener is the fallback for `o` and for yazi outside tmux.
 [opener]
 edit = [
-	{ run = 'vim %s', block = true, desc = "vim" },
+	{ run = 'nvim %s', block = true, desc = "nvim" },
 ]

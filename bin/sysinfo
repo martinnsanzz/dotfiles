@@ -1,0 +1,297 @@
+#!/usr/bin/env python3
+"""Computer info plus a small live CPU / memory readout, for the home tab.
+
+Static facts (model, chip, macOS, ...) are read once; the bars refresh every
+couple of seconds.   q = quit
+"""
+
+import collections
+import ctypes
+import ctypes.util
+import curses
+import locale
+import os
+import platform
+import pwd
+import re
+import shutil
+import socket
+import subprocess
+import time
+
+REFRESH_SECONDS = 2
+HISTORY = 120  # CPU samples kept for the sparkline
+
+# name: (256-color, fallback for 8-color terminals)
+PALETTE = {
+    "dim": (240, curses.COLOR_WHITE),
+    "gray": (245, curses.COLOR_WHITE),
+    "white": (255, curses.COLOR_WHITE),
+    "key": (75, curses.COLOR_BLUE),
+    "yellow": (221, curses.COLOR_YELLOW),
+    "red": (203, curses.COLOR_RED),
+    "green": (71, curses.COLOR_GREEN),
+}
+
+SPARK = " ▁▂▃▄▅▆▇█"
+
+
+def sh(*cmd):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=5).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def sysctl(name):
+    return sh("sysctl", "-n", name)
+
+
+def gb(n):
+    return f"{n / 2**30:.1f}"
+
+
+def duration(seconds):
+    m = int(seconds) // 60
+    d, h, m = m // 1440, m // 60 % 24, m % 60
+    return f"{d}d {h}h" if d else f"{h}h {m}m" if h else f"{m}m"
+
+
+# ── reading the machine ────────────────────────────────────────────────
+
+
+class CpuTicks:
+    """Per-core busy/total ticks from the Mach kernel, without spawning ps/top."""
+
+    def __init__(self):
+        self.libc = ctypes.CDLL(ctypes.util.find_library("c"))
+        self.host = self.libc.mach_host_self()
+        self.task = ctypes.c_uint.in_dll(self.libc, "mach_task_self_")
+        self.prev = None
+
+    def read(self):
+        count = ctypes.c_uint()
+        info = ctypes.POINTER(ctypes.c_int)()
+        info_count = ctypes.c_uint()
+        # PROCESSOR_CPU_LOAD_INFO = 2: user, system, idle, nice per core.
+        if self.libc.host_processor_info(self.host, 2, ctypes.byref(count),
+                                         ctypes.byref(info), ctypes.byref(info_count)):
+            return None
+        ticks = [tuple(info[i * 4 + j] & 0xFFFFFFFF for j in range(4))
+                 for i in range(count.value)]
+        self.libc.vm_deallocate(self.task, ctypes.cast(info, ctypes.c_void_p),
+                                ctypes.c_size_t(info_count.value * 4))
+        return ticks
+
+    def usage(self):
+        """(total %, [per-core %]) since the last call."""
+        now = self.read()
+        if now is None:
+            return 0.0, []
+        prev, self.prev = self.prev, now
+        if prev is None or len(prev) != len(now):
+            return 0.0, [0.0] * len(now)
+        cores, busy_all, total_all = [], 0, 0
+        for (u, s, i, n), (pu, ps, pi, pn) in zip(now, prev):
+            busy = (u - pu) + (s - ps) + (n - pn)
+            total = busy + (i - pi)
+            busy_all += busy
+            total_all += total
+            cores.append(100 * busy / total if total else 0.0)
+        return (100 * busy_all / total_all if total_all else 0.0), cores
+
+
+def static_info():
+    """Facts that don't change while the pane is open."""
+    info = []
+    user = pwd.getpwuid(os.getuid()).pw_name
+    host = socket.gethostname().removesuffix(".local")
+    title = f"{user}@{host}"
+
+    hw = sh("system_profiler", "SPHardwareDataType")
+    model = re.search(r"Model Name: (.+)", hw)
+    model = model.group(1) if model else sysctl("hw.model")
+    info.append(("model", f"{model} ({sysctl('hw.model')})"))
+
+    os_name = {"15": "Sequoia", "14": "Sonoma", "26": "Tahoe", "13": "Ventura"}
+    version = sh("sw_vers", "-productVersion")
+    name = os_name.get(version.split(".")[0], "")
+    info.append(("os", f"macOS {name} {version}".replace("  ", " ")))
+
+    chip = sysctl("machdep.cpu.brand_string") or platform.processor()
+    perf, eff = sysctl("hw.perflevel0.physicalcpu"), sysctl("hw.perflevel1.physicalcpu")
+    cores = f"{perf}P+{eff}E" if perf and eff else f"{os.cpu_count()} cores"
+    info.append(("chip", f"{chip} · {cores}"))
+
+    mem = int(sysctl("hw.memsize") or 0)
+    info.append(("ram", f"{mem // 2**30} GB"))
+
+    # The shell this pane runs in (fish under tmux), not the login $SHELL.
+    shell = sh("ps", "-o", "comm=", "-p", str(os.getppid())).lstrip("-")
+    info.append(("shell", os.path.basename(shell or os.environ.get("SHELL", ""))))
+    return title, info, mem
+
+
+def memory(total):
+    """(used, swap used) in bytes; used matches Activity Monitor's Memory Used."""
+    out = sh("vm_stat")
+    page = re.search(r"page size of (\d+)", out)
+    page = int(page.group(1)) if page else 16384
+    pages = {k.strip('"'): int(v.rstrip("."))
+             for k, v in re.findall(r"^(.+?):\s+(\d+)\.?$", out, re.M)}
+    used = (pages.get("Anonymous pages", 0) - pages.get("Pages purgeable", 0)
+            + pages.get("Pages wired down", 0)
+            + pages.get("Pages occupied by compressor", 0)) * page
+    swap = re.search(r"used = ([\d.]+)M", sysctl("vm.swapusage"))
+    return min(max(used, 0), total), float(swap.group(1)) * 2**20 if swap else 0
+
+
+def battery():
+    """(percent, state) or None on a desktop Mac."""
+    m = re.search(r"(\d+)%; ([^;]+)", sh("pmset", "-g", "batt"))
+    return (int(m.group(1)), m.group(2).strip()) if m else None
+
+
+def uptime():
+    m = re.search(r"sec = (\d+)", sysctl("kern.boottime"))
+    return time.time() - int(m.group(1)) if m else 0
+
+
+def local_ip():
+    for iface in ("en0", "en1"):
+        ip = sh("ipconfig", "getifaddr", iface)
+        if ip:
+            return ip
+    return "offline"
+
+
+# ── drawing ────────────────────────────────────────────────────────────
+
+
+def level(pct):
+    return "red" if pct >= 90 else "yellow" if pct >= 70 else "key"
+
+
+class Screen:
+    def __init__(self, stdscr, attrs):
+        self.s, self.attrs = stdscr, attrs
+        self.h, self.w = stdscr.getmaxyx()
+        self.y = 0
+
+    def put(self, x, text, color="gray", y=None):
+        y = self.y if y is None else y
+        if 0 <= y < self.h and x < self.w:
+            try:
+                self.s.addstr(y, x, text[:max(0, self.w - x)], self.attrs[color])
+            except curses.error:
+                pass
+
+    def row(self, label, value, color="gray"):
+        self.put(1, f"{label:<7}", "key")
+        self.put(8, value, color)
+        self.y += 1
+
+    def bar(self, label, pct, text, color=None):
+        """label ▕████░░░░▏ text — the bar takes whatever width is left."""
+        width = max(4, min(24, self.w - 26))
+        filled = round(width * min(pct, 100) / 100)
+        self.put(1, f"{label:<6}", "key")
+        self.put(7, "▕", "dim")
+        self.put(8, "█" * filled, color or level(pct))
+        self.put(8 + filled, "░" * (width - filled), "dim")
+        self.put(8 + width, "▏", "dim")
+        self.put(10 + width, text)
+        self.y += 1
+
+
+def run(stdscr):
+    curses.curs_set(0)
+    curses.use_default_colors()
+    attrs = {}
+    for i, (name, (rich, basic)) in enumerate(PALETTE.items(), start=1):
+        curses.init_pair(i, rich if curses.COLORS >= 256 else basic, -1)
+        attrs[name] = curses.color_pair(i)
+    stdscr.timeout(200)
+
+    title, info, mem_total = static_info()
+    ticks = CpuTicks()
+    ticks.usage()
+    history = collections.deque(maxlen=HISTORY)
+    sample = {}
+    next_sample = 0
+
+    while True:
+        now = time.monotonic()
+        if now >= next_sample:
+            next_sample = now + REFRESH_SECONDS
+            cpu, cores = ticks.usage()
+            history.append(cpu)
+            used, swap = memory(mem_total)
+            disk = shutil.disk_usage("/System/Volumes/Data"
+                                     if os.path.isdir("/System/Volumes/Data") else "/")
+            sample = dict(cpu=cpu, cores=cores, load=os.getloadavg(), used=used,
+                          swap=swap, disk=disk, batt=battery(), up=uptime(),
+                          ip=local_ip())
+
+        scr = Screen(stdscr, attrs)
+        stdscr.erase()
+        scr.y = 1 if scr.h > 22 else 0
+        scr.put(1, title, "white")
+        scr.y += 1
+        scr.put(1, "─" * min(len(title), scr.w - 2), "dim")
+        scr.y += 1
+        for label, value in info:
+            scr.row(label, value)
+        scr.row("uptime", duration(sample["up"]))
+        scr.row("ip", sample["ip"])
+        scr.y += 1
+
+        cpu = sample["cpu"]
+        scr.bar("cpu", cpu, f"{cpu:3.0f}%")
+        # One block per core, height = how busy it is.
+        cores = sample["cores"]
+        if cores:
+            scr.put(1, "cores", "dim")
+            for i, pct in enumerate(cores):
+                scr.put(8 + i, SPARK[max(1, min(8, round(pct / 12.5)))], level(pct))
+            scr.y += 1
+        # Sparkline of the recent total, newest on the right.
+        spark_w = max(0, scr.w - 9)
+        recent = list(history)[-spark_w:]
+        scr.put(1, "hist", "dim")
+        for i, pct in enumerate(recent):
+            scr.put(8 + spark_w - len(recent) + i, SPARK[max(1, min(8, round(pct / 12.5)))],
+                    level(pct))
+        scr.y += 1
+        load = " ".join(f"{x:.2f}" for x in sample["load"])
+        scr.row("load", load)
+        scr.y += 1
+
+        used = sample["used"]
+        scr.bar("mem", 100 * used / mem_total if mem_total else 0,
+                f"{gb(used)}/{gb(mem_total)} GB")
+        if sample["swap"]:
+            scr.row("swap", f"{gb(sample['swap'])} GB")
+        disk = sample["disk"]
+        scr.bar("disk", 100 * disk.used / disk.total, f"{gb(disk.used)}/{gb(disk.total)} GB")
+        if sample["batt"]:
+            pct, state = sample["batt"]
+            # Low battery is the problem, not a full one.
+            scr.bar("batt", pct, f"{pct}% {state}",
+                    "red" if pct <= 10 else "yellow" if pct <= 25 else "green")
+        stdscr.refresh()
+
+        if stdscr.getch() == ord("q"):
+            break
+
+
+def main():
+    locale.setlocale(locale.LC_ALL, "")
+    try:
+        curses.wrapper(run)
+    except KeyboardInterrupt:
+        pass
+
+
+if __name__ == "__main__":
+    main()

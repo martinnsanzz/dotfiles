@@ -1,93 +1,884 @@
-#!/usr/bin/env bash
-# Shows a random ASCII art from the repo's art/ folder next to the main
-# shortcuts, centered in the pane. Redraws when the pane is resized.
-#   r = new random art    q = quit to the shell
-# Add art by dropping a .txt file into art/.
+#!/usr/bin/env python3
+"""Animated ASCII scenes for the home tab, with the main shortcuts on top.
+
+Each scene loops on its own; the player moves on to another one every
+couple of minutes.
+  n = next scene   p = previous   space = pause   k = hide keys   q = quit
+
+  home-art            rotate through every scene
+  home-art aquarium   play only that scene
+  home-art --list     list the scenes
+
+The "bounce" scene bounces a random file from the repo's art/ folder, so
+drop a .txt in there to add to it.
+"""
+
+import curses
+import locale
+import math
+import os
+import random
+import sys
+import time
+
+FPS = 12
+ROTATE_SECONDS = 120
 
 # Follow the ~/.local/bin symlink back into the repo to find art/.
-self=$(readlink "$0" || echo "$0")
-ART_DIR=${ART_DIR:-$(cd "$(dirname "$self")/../art" && pwd)}
+ART_DIR = os.environ.get("ART_DIR") or os.path.join(
+    os.path.dirname(os.path.realpath(__file__)), "..", "art")
 
-arts=("$ART_DIR"/*.txt)
-art_lines=()
-
-KEY=$'\e[1;34m' DIM=$'\e[38;5;245m' ART=$'\e[36m' RESET=$'\e[0m'
-
-# key|description — keys are padded by hand: printf counts ⌥ and arrows as
-# several bytes, so %-Ns padding would misalign them.
-shortcuts=(
-	"⌥ 1-9    |switch tab"
-	"⌥ ←↑↓→   |move pane"
-	"⌥⇧←↑↓→   |resize pane"
-	"⌥ z      |zoom pane"
-	"⌥ t / d  |new tab / dev tab"
-	"⌥ v / s  |split  │ / ─"
-	"⌥ w      |close pane"
-	"⌥ u      |scroll history"
-	"⌥ ?      |all shortcuts"
-	"r        |new art"
-)
-SHORTCUTS_WIDTH=28
-GAP=5
-
-draw() {
-	local cols lines art_w=0 line i
-	cols=$(tput cols) lines=$(tput lines)
-	for line in "${art_lines[@]}"; do
-		[ ${#line} -gt $art_w ] && art_w=${#line}
-	done
-
-	# Drop the shortcut column if the pane is too narrow for both.
-	local show_keys=1 total_w=$((art_w + GAP + SHORTCUTS_WIDTH))
-	if [ $total_w -gt "$cols" ]; then
-		show_keys=0 total_w=$art_w
-	fi
-
-	local rows=${#art_lines[@]}
-	[ $show_keys = 1 ] && [ ${#shortcuts[@]} -gt "$rows" ] && rows=${#shortcuts[@]}
-
-	local top=$(((lines - rows) / 2)) left=$(((cols - total_w) / 2))
-	[ $top -lt 0 ] && top=0
-	[ $left -lt 0 ] && left=0
-	local pad
-	pad=$(printf '%*s' "$left" '')
-
-	clear
-	for ((i = 0; i < top; i++)); do echo; done
-	for ((i = 0; i < rows; i++)); do
-		printf '%s%s%-*s%s' "$pad" "$ART" "$art_w" "${art_lines[i]:-}" "$RESET"
-		if [ $show_keys = 1 ] && [ $i -lt ${#shortcuts[@]} ]; then
-			local entry=${shortcuts[i]}
-			printf '%*s%s%s%s %s%s%s' "$GAP" '' "$KEY" "${entry%%|*}" "$RESET" "$DIM" "${entry#*|}" "$RESET"
-		fi
-		echo
-	done
+# name: (256-color, fallback for 8-color terminals)
+PALETTE = {
+    "dim": (240, curses.COLOR_WHITE),
+    "gray": (245, curses.COLOR_WHITE),
+    "white": (255, curses.COLOR_WHITE),
+    "key": (75, curses.COLOR_BLUE),
+    "blue": (69, curses.COLOR_BLUE),
+    "sea": (31, curses.COLOR_BLUE),
+    "deep": (24, curses.COLOR_BLUE),
+    "cyan": (80, curses.COLOR_CYAN),
+    "green": (71, curses.COLOR_GREEN),
+    "lime": (113, curses.COLOR_GREEN),
+    "forest": (28, curses.COLOR_GREEN),
+    "yellow": (221, curses.COLOR_YELLOW),
+    "orange": (208, curses.COLOR_YELLOW),
+    "red": (203, curses.COLOR_RED),
+    "pink": (211, curses.COLOR_MAGENTA),
+    "magenta": (176, curses.COLOR_MAGENTA),
+    "wood": (94, curses.COLOR_YELLOW),
+    "bark": (136, curses.COLOR_YELLOW),
+    "sand": (180, curses.COLOR_YELLOW),
 }
 
-new_art() {
-	local file=${arts[RANDOM % ${#arts[@]}]} line
-	art_lines=()
-	while IFS= read -r line || [ -n "$line" ]; do
-		art_lines+=("$line")
-	done <"$file"
-	draw
-}
+# key|description — Option-key shortcuts from tmux.conf, plus this pane's own.
+SHORTCUTS = [
+    ("⌥ 1-9", "switch tab"),
+    ("⌥ ←↑↓→", "move pane"),
+    ("⌥⇧←↑↓→", "resize pane"),
+    ("⌥ z", "zoom pane"),
+    ("⌥ c / d", "claude / developer"),
+    ("⌥ t", "new shell tab"),
+    ("⌥ v / s", "split  │ / ─"),
+    ("⌥ w / x", "close pane / tab"),
+    ("⌥ u", "scroll history"),
+    ("⌥ /", "all shortcuts"),
+    ("⌥ n", "nvim shortcuts"),
+    ("n / p", "next / prev scene"),
+    ("k", "hide these keys"),
+]
 
-tput civis
-trap 'tput cnorm' EXIT
 
-new_art
-size="$(tput cols)x$(tput lines)"
-while true; do
-	if read -rsn1 -t 1 key; then
-		case $key in
-			q) clear; break ;;
-			r) new_art ;;
-		esac
-	fi
-	now="$(tput cols)x$(tput lines)"
-	if [ "$now" != "$size" ]; then
-		size=$now
-		draw
-	fi
-done
+class Canvas:
+    """A frame of characters and color names; spaces in sprites are see-through."""
+
+    def __init__(self, w, h):
+        self.w, self.h = w, h
+        self.panel = None  # (x, y, w, h) covered by the shortcuts box
+        self.clear()
+
+    def clear(self):
+        self.chars = [[" "] * self.w for _ in range(self.h)]
+        self.colors = [[None] * self.w for _ in range(self.h)]
+
+    def put(self, x, y, text, color=None, opaque=False):
+        x, y = int(round(x)), int(round(y))
+        if not 0 <= y < self.h:
+            return
+        chars, colors = self.chars[y], self.colors[y]
+        for i, ch in enumerate(text):
+            cx = x + i
+            if 0 <= cx < self.w and (opaque or ch != " "):
+                chars[cx] = ch
+                colors[cx] = color
+
+    def sprite(self, x, y, lines, color=None):
+        for i, line in enumerate(lines):
+            self.put(x, y + i, line, color)
+
+    def covered(self, x, y):
+        if not self.panel:
+            return False
+        px, py, pw, ph = self.panel
+        return px - 1 <= x < px + pw + 1 and py <= y < py + ph
+
+    def free_right(self):
+        """Rightmost column not under the shortcuts box (for placing things)."""
+        return self.panel[0] - 2 if self.panel else self.w
+
+
+MIRROR = str.maketrans("<>()[]{}/\\", "><)(][}{\\/")
+
+
+def mirror(lines):
+    width = max(len(line) for line in lines)
+    return [line.ljust(width)[::-1].translate(MIRROR) for line in lines]
+
+
+def width_of(lines):
+    return max(len(line) for line in lines)
+
+
+def starfield(c, rng, density=40, top=0, bottom=None):
+    bottom = c.h if bottom is None else bottom
+    count = max(1, c.w * (bottom - top) // density)
+    return [[rng.randrange(c.w), rng.randrange(top, max(top + 1, bottom)),
+             rng.choice("..·*+"), rng.random() * 6] for _ in range(count)]
+
+
+def draw_stars(c, stars, t):
+    for x, y, ch, phase in stars:
+        twinkle = math.sin(t * 0.15 + phase)
+        if twinkle > -0.6:
+            c.put(x, y, ch, "white" if twinkle > 0.7 else "dim")
+
+
+# ── 1. bonsai ──────────────────────────────────────────────────────────
+
+
+def bonsai(c, rng):
+    """A bonsai grows branch by branch from a pot, then drops its leaves."""
+    pot = [r":______./~~~\.______:",
+           r" \                 /",
+           r"  \_______________/",
+           r"  (_)           (_)"]
+    py = c.h - len(pot)
+    lo, hi = 14, c.free_right() - 14
+    cx = rng.randint(lo, hi) if hi > lo else c.w // 2
+    leaf_colors = rng.choice([("green", "lime", "forest"),
+                              ("pink", "magenta", "white"),
+                              ("orange", "yellow", "red")])
+    wood, leaves = {}, {}
+    trunk_life = max(8, min(py - 2, 30))
+    branches = [[cx, py, "trunk", trunk_life]]  # x, y, kind, life left
+    spread = max(4, c.w // 8)
+
+    def leaf_cluster(x, y, n, rx=2, ry=1):
+        for _ in range(n):
+            lx, ly = x + rng.randint(-rx, rx), y + rng.randint(-ry, ry)
+            if 0 <= ly < py:
+                leaves[(lx, ly)] = ("&", rng.choice(leaf_colors))
+
+    def grow(b):
+        x, y, kind, life = b
+        b[3] -= 1
+        if kind == "trunk":
+            dx, dy = rng.choice((-1, 0, 0, 1)), -1 if rng.random() < 0.75 else 0
+            if life > trunk_life - 3:
+                dx, dy = 0, -1
+            if abs(x + dx - cx) > spread:
+                dx = 0
+            if life < trunk_life - 3 and rng.random() < 0.35:
+                kid = rng.choice(("left", "right"))
+                branches.append([x, y, kid, rng.randint(max(3, life // 2), life + 4)])
+        elif kind in ("left", "right"):
+            dx = rng.choice((-1, -1, 0)) if kind == "left" else rng.choice((1, 1, 0))
+            dy = rng.choice((-1, 0, 0))
+            if rng.random() < 0.15:
+                branches.append([x, y, "twig", rng.randint(2, 4)])
+        else:
+            dx, dy = rng.choice((-1, 1)), rng.choice((-1, 0))
+        if dx == 0 and dy == 0:
+            dy = -1
+        nx, ny = x + dx, max(1, y + dy)
+        if ny == y:
+            ch = "_" if kind != "twig" else "~"
+        else:
+            ch = "\\" if dx < 0 else "/" if dx > 0 else "|"
+        wood[(nx, ny)] = (ch, "bark" if kind == "trunk" else "wood")
+        b[0], b[1] = nx, ny
+        if b[3] < 3:
+            leaf_cluster(nx, ny, 2)
+        if b[3] <= 0:
+            leaf_cluster(nx, ny, 10, 3, 2)
+
+    def draw(falling=()):
+        c.sprite(cx - 10, py, pot, "gray")
+        for (x, y), (ch, col) in wood.items():
+            c.put(x, y, ch, col)
+        for (x, y), (ch, col) in leaves.items():
+            c.put(x, y, ch, col)
+        for x, y, ch, col in falling:
+            c.put(x, y, ch, col)
+
+    t = 0
+    while branches:
+        if t % 2 == 0:
+            for b in list(branches):
+                grow(b)
+                if b[3] <= 0:
+                    branches.remove(b)
+        draw()
+        yield
+        t += 1
+    for _ in range(FPS * 10):
+        draw()
+        yield
+    falling = []
+    for _ in range(FPS * 6):
+        for key in rng.sample(list(leaves), min(len(leaves), 3)):
+            falling.append([key[0], key[1], *leaves.pop(key)])
+        for leaf in falling:
+            leaf[1] += 0.34
+            leaf[0] += rng.choice((-0.4, 0, 0.4))
+        falling = [f for f in falling if f[1] < py]
+        draw(falling)
+        yield
+
+
+# ── 2. aquarium ────────────────────────────────────────────────────────
+
+FISH = [
+    ["><>"],
+    ["><(((o>"],
+    ["><))'>"],
+    ["  __", r"\/ o\ ", r"/\__/"],
+]
+
+
+def aquarium(c, rng):
+    """Fish swim both ways past swaying seaweed while bubbles rise."""
+    def new_fish(anywhere=False):
+        shape = rng.choice(FISH)
+        dx = rng.choice((-1, 1)) * rng.uniform(0.15, 0.6)
+        lines = shape if dx > 0 else mirror(shape)
+        fw = width_of(lines)
+        if anywhere:
+            x = rng.uniform(0, c.w - fw)
+        else:
+            x = -fw if dx > 0 else c.w
+        y = rng.randint(2, max(2, c.h - 2 - len(lines)))
+        return {"x": x, "y": y, "dx": dx, "lines": lines, "w": fw,
+                "color": rng.choice(("yellow", "orange", "cyan", "pink", "magenta", "blue"))}
+
+    fish = [new_fish(True) for _ in range(max(3, c.w * c.h // 350))]
+    weeds = [(rng.randrange(c.w), rng.randint(2, max(2, c.h // 2)))
+             for _ in range(max(2, c.w // 16))]
+    sand = [rng.choice("._.,_ ") for _ in range(c.w)]
+    bubbles = []
+    t = 0
+    while True:
+        for x in range(c.w):
+            c.put(x, 0, "~^~-"[(x + t // 3) % 4], "sea")
+            c.put(x, c.h - 1, sand[x], "sand")
+        for wx, height in weeds:
+            for i in range(height):
+                c.put(wx, c.h - 2 - i, "()"[(i + t // 6) % 2], "green")
+        for f in fish:
+            f["x"] += f["dx"]
+            if rng.random() < 0.02:
+                mouth = f["x"] + f["w"] if f["dx"] > 0 else f["x"]
+                bubbles.append([mouth, f["y"]])
+        fish = [f if -f["w"] - 1 <= f["x"] <= c.w + 1 else new_fish() for f in fish]
+        for f in fish:
+            c.sprite(f["x"], f["y"], f["lines"], f["color"])
+        if rng.random() < 0.05:
+            bubbles.append([rng.randrange(c.w), c.h - 2])
+        for b in bubbles:
+            if t % 3 == 0:
+                b[1] -= 1
+                b[0] += rng.choice((-1, 0, 0, 1))
+        bubbles = [b for b in bubbles if b[1] > 0]
+        for x, y in bubbles:
+            c.put(x, y, "O" if y < c.h // 3 else "o" if y < c.h * 2 // 3 else ".", "cyan")
+        yield
+        t += 1
+
+
+# ── 3. rocket ──────────────────────────────────────────────────────────
+
+ROCKET = ["  ^  ", " /_\\ ", " |o| ", " | | ", "/|_|\\"]
+FLAMES = [[" *'* ", "  '  "], [" '*' ", "  *  "], ["  *  ", " ' ' "]]
+
+
+def rocket(c, rng):
+    """A rocket counts down, launches and arcs off the top of the sky."""
+    stars = starfield(c, rng)
+    rh = len(ROCKET)
+    x = rng.randint(4, max(4, c.free_right() - 10))
+    y = c.h - rh - 2
+    vx = rng.choice((-1, 1)) * rng.uniform(0.2, 0.7)
+    vy = 0.0
+    smoke = []
+    t = 0
+    while y + rh + 3 > 0:
+        launched = t > FPS * 2
+        if launched:
+            vy = max(-0.8, vy - 0.02)
+            y += vy
+            x += vx * min(1.0, -vy)
+            if x < 0 or x > c.w - 5:
+                vx = -vx
+            # The sky slides down as the rocket climbs.
+            for s in stars:
+                s[1] += -vy * 0.3
+                if s[1] >= c.h:
+                    s[1], s[0] = 0, rng.randrange(c.w)
+        base = (x + 2, y + rh + 1)
+        if launched or rng.random() < 0.6:
+            for _ in range(2 if launched else 1):
+                spread = 0.5 if launched else 1.5
+                smoke.append([base[0], base[1], rng.uniform(-spread, spread), 0])
+        for s in smoke:
+            s[0] += s[2] * 0.3
+            s[3] += 1
+        smoke = [s for s in smoke if s[3] < 20]
+
+        draw_stars(c, stars, t)
+        c.put(0, c.h - 1, "_" * c.w, "dim")
+        if not launched:
+            c.put(x - 1, c.h - 1, "[=====]", "gray")
+        for sx, sy, _, age in smoke:
+            c.put(sx, sy, "@Oo:. "[min(5, age // 4)], "gray" if age < 10 else "dim")
+        c.sprite(x, y, ROCKET, "white")
+        c.put(x + 2, y + 2, "o", "cyan")
+        if launched:
+            c.sprite(x, y + rh, FLAMES[t % len(FLAMES)], "orange" if t % 2 else "yellow")
+        yield
+        t += 1
+    for _ in range(FPS * 2):
+        draw_stars(c, stars, t)
+        yield
+        t += 1
+
+
+# ── 4. train ───────────────────────────────────────────────────────────
+
+ENGINE = [r" _____      _      ",
+          r"| [] |_____|=|___  ",
+          r"|    |  ___   _  \ ",
+          r"|____|_|___|_|____>",
+          r" (O)    (O)  (O)   "]
+CAR = [r" ____________ ",
+       r"| [] [] [] []|",
+       r"|____________|",
+       r"  (O)    (O)  "]
+
+
+def hills(c, rng, base, height, color):
+    """Draw a ridge line of /, \\ and _ across the pane."""
+    a, b, p = rng.uniform(0.03, 0.08), rng.uniform(0.1, 0.2), rng.random() * 9
+    tops = [base - int(height * (0.6 + 0.4 * math.sin(x * a + p)) *
+                       (0.7 + 0.3 * math.sin(x * b))) for x in range(c.w + 1)]
+    ridge = []
+    for x in range(c.w):
+        here, nxt = tops[x], tops[x + 1]
+        ch = "/" if nxt < here else "\\" if nxt > here else "_"
+        ridge.append((x, min(here, nxt) if ch != "_" else here, ch))
+    return [(x, y, ch, color) for x, y, ch in ridge]
+
+
+def train(c, rng):
+    """A steam train crosses the hills, puffing smoke."""
+    ridge = hills(c, rng, c.h - 7, max(2, c.h // 3), "forest")
+    sun_x = rng.randint(3, max(3, c.free_right() - 8))
+    cars = rng.randint(2, 5)
+    parts = [CAR] * cars + [ENGINE]
+    length = sum(width_of(p) + 1 for p in parts)
+    x = float(-length)
+    top = c.h - 1 - len(ENGINE)
+    puffs = []
+    t = 0
+    while x < c.w + 2:
+        x += 0.7
+        for rx, ry, ch, col in ridge:
+            c.put(rx, ry, ch, col)
+        c.sprite(sun_x, 1, [r"\ | /", r"- O -", r"/ | \ "], "yellow")
+        c.put(0, c.h - 1, "=" * c.w, "dim")
+        spokes = "|/-\\"[t // 2 % 4]
+        px = x
+        for part in parts:
+            ptop = c.h - 1 - len(part)
+            lines = [line.replace("O", spokes) for line in part]
+            c.sprite(px, ptop, lines, "red" if part is ENGINE else "gray")
+            pw = width_of(part)
+            px += pw + 1
+            if part is not ENGINE:
+                c.put(px - 1, ptop + 2, "-", "dim")
+        chimney = x + length - width_of(ENGINE) - 1 + 12
+        if t % 4 == 0:
+            puffs.append([chimney, top - 1, 0])
+        for p in puffs:
+            p[2] += 1
+            if p[2] % 3 == 0:
+                p[1] -= 1
+            p[0] -= 0.15
+        puffs = [p for p in puffs if p[2] < 36 and p[1] >= 0]
+        for px_, py_, age in puffs:
+            c.put(px_, py_, ["(@)", "(O)", " o ", " . "][min(3, age // 9)],
+                  "white" if age < 18 else "dim")
+        yield
+        t += 1
+
+
+# ── 5. sailboat ────────────────────────────────────────────────────────
+
+BOAT = [r"      |\ ",
+        r"      | \ ",
+        r"      |  \ ",
+        r"      |___\ ",
+        r" \____|_____/",
+        r"  \_________/"]
+MOON = [r"  _.._", r".' .-'", r"|  (", r"'. '-.", r"  '--'"]
+
+
+def sailboat(c, rng):
+    """A sailboat drifts across rolling night waves; gulls fly over."""
+    sea_top = max(3, c.h * 3 // 5)
+    stars = starfield(c, rng, 60, 0, sea_top)
+    moon_x = rng.randint(2, max(2, c.free_right() - 8))
+    gulls = [[rng.uniform(0, c.w), rng.randint(1, max(1, sea_top - 4)), rng.uniform(0.2, 0.5)]
+             for _ in range(rng.randint(1, 3))]
+    x = float(-width_of(BOAT))
+    t = 0
+    while x < c.w:
+        x += 0.25
+        draw_stars(c, stars, t)
+        c.sprite(moon_x, 1, MOON, "yellow")
+        for y in range(sea_top, c.h):
+            depth = y - sea_top
+            for sx in range(c.w):
+                v = math.sin(sx * 0.25 + t * 0.12 + depth * 1.7) + math.sin(sx * 0.07 - t * 0.05)
+                ch = "~" if v > 0.9 else "-" if v > 0.1 else " "
+                if moon_x <= sx < moon_x + 6 and ch == " " and rng.random() < 0.3:
+                    c.put(sx, y, "-", "yellow")
+                else:
+                    c.put(sx, y, ch, "cyan" if depth < 2 else "sea" if depth < 5 else "deep")
+        bob = round(math.sin(t * 0.15) * 0.6)
+        c.sprite(x, sea_top - len(BOAT) + 1 + bob, BOAT, "white")
+        for g in gulls:
+            g[0] += g[2]
+            if g[0] > c.w:
+                g[0], g[1] = -3, rng.randint(1, max(1, sea_top - 4))
+            c.put(g[0], g[1] + round(math.sin(t * 0.1 + g[2] * 9)), r"\/" if t // 4 % 2 else "--", "gray")
+        yield
+        t += 1
+
+
+# ── 6. cat ─────────────────────────────────────────────────────────────
+
+CAT = [r"            /\_/\ ",
+       r" \\   _____( o.o )",
+       r"  \\_/        >^< ",
+       r"    \_________/   "]
+CAT_LEGS = [r"     / /   / /   ", r"     \ \   \ \   ", r"     | |   | |   "]
+
+
+def cat(c, rng):
+    """A cat walks across the grass after a butterfly, pouncing now and then."""
+    ground = c.h - 1
+    grass = [rng.choice(",'`.\"  ") for _ in range(c.w)]
+    flowers = {rng.randrange(c.w): rng.choice(("pink", "yellow", "magenta"))
+               for _ in range(max(1, c.w // 25))}
+    x = float(-width_of(CAT))
+    jump_at, jump = rng.randint(FPS * 3, FPS * 6), -1
+    t = 0
+    while x < c.w + 30:
+        hop = 0
+        if jump >= 0:
+            jump += 1
+            hop = round(math.sin(jump / 14 * math.pi) * 4)
+            x += 1.0
+            if jump >= 14:
+                jump, jump_at = -1, t + rng.randint(FPS * 4, FPS * 8)
+        else:
+            x += 0.4
+            if t >= jump_at:
+                jump = 0
+        for gx, ch in enumerate(grass):
+            c.put(gx, ground, ch, "green")
+        for fx, col in flowers.items():
+            c.put(fx, ground - 1, "*", col)
+            c.put(fx, ground, "|", "forest")
+        top = ground - len(CAT) - 1 - hop
+        c.sprite(x, top, CAT, "orange")
+        c.put(x, top + len(CAT), CAT_LEGS[2 if jump >= 0 else t // 3 % 2], "orange")
+        # The butterfly stays just out of reach.
+        bx = x + 22 + 6 * math.sin(t * 0.07)
+        by = ground - 6 - 3 * abs(math.sin(t * 0.09)) - (3 if jump >= 0 else 0)
+        c.put(bx, by, "}{" if t // 2 % 2 else ")(", "magenta")
+        yield
+        t += 1
+
+
+# ── 7. ufo ─────────────────────────────────────────────────────────────
+
+UFO = [r"     _____",
+       r"  __/ o o \__",
+       r" (___________)"]
+
+
+def city(c, rng):
+    buildings, x = [], 0
+    while x < c.w:
+        bw = rng.randint(5, 11)
+        bh = rng.randint(3, max(3, c.h // 2))
+        buildings.append((x, bw, bh,
+                          {(wx, wy): rng.random() < 0.4
+                           for wx in range(2, bw - 1, 2) for wy in range(1, bh)}))
+        x += bw + rng.randint(0, 2)
+    return buildings
+
+
+def draw_city(c, rng, buildings):
+    for bx, bw, bh, windows in buildings:
+        top = c.h - bh
+        c.put(bx, top - 1, " " + "_" * (bw - 2), "dim")
+        for y in range(top, c.h):
+            c.put(bx, y, "|", "dim")
+            c.put(bx + bw - 1, y, "|", "dim")
+        for (wx, wy), lit in windows.items():
+            if rng.random() < 0.001:
+                windows[(wx, wy)] = not lit
+            c.put(bx + wx, top + wy - 1, "▪" if lit else "·", "yellow" if lit else "dim")
+
+
+def ufo(c, rng):
+    """A UFO hops between spots over the city and beams people up."""
+    buildings = city(c, rng)
+    stars = starfield(c, rng, 50, 0, c.h // 2)
+    uw = width_of(UFO)
+    x, y = float(rng.randint(0, max(0, c.w - uw))), 1.0
+    t = 0
+    while True:
+        tx = rng.randint(0, max(0, c.free_right() - uw))
+        ty = rng.randint(1, max(1, c.h // 3))
+        while abs(tx - x) > 0.5 or abs(ty - y) > 0.3:
+            x += (tx - x) * 0.06 + (0.3 if tx > x else -0.3)
+            y += (ty - y) * 0.1
+            if abs(tx - x) < 0.6:
+                x = tx
+            draw_stars(c, stars, t)
+            draw_city(c, rng, buildings)
+            draw_ufo(c, x, y + math.sin(t * 0.2) * 0.4, t)
+            yield
+            t += 1
+        beam_frames = FPS * 4
+        for f in range(beam_frames):
+            draw_stars(c, stars, t)
+            draw_city(c, rng, buildings)
+            draw_beam(c, rng, round(x) + uw // 2, round(y) + 4, f / beam_frames)
+            draw_ufo(c, x, y, t)
+            yield
+            t += 1
+
+
+def draw_ufo(c, x, y, t):
+    c.sprite(x, y, UFO, "gray")
+    c.put(x + 6, y + 1, "o o", "lime")
+    lights = "".join("*" if (i + t // 2) % 3 == 0 else "." for i in range(5))
+    c.put(x + 3, y + 3, " ".join(lights), "yellow")
+
+
+def draw_beam(c, rng, cx, top, progress):
+    for i, y in enumerate(range(top, c.h)):
+        half = 1 + i // 2
+        c.put(cx - half, y, "/", "lime")
+        c.put(cx + half, y, "\\", "lime")
+        for bx in range(cx - half + 1, cx + half):
+            if rng.random() < 0.25:
+                c.put(bx, y, ":", "green")
+    rise = c.h - 3 - progress * (c.h - 3 - top)
+    if rise > top:
+        c.put(cx - 1, rise, r"\o/", "white")
+        c.put(cx, rise + 1, "|", "white")
+
+
+# ── 8. bounce ──────────────────────────────────────────────────────────
+
+
+def bounce(c, rng):
+    """A drawing from art/ bounces off the edges, changing color each hit."""
+    try:
+        files = [f for f in os.listdir(ART_DIR) if f.endswith(".txt")]
+        with open(os.path.join(ART_DIR, rng.choice(files))) as f:
+            art = f.read().rstrip("\n").split("\n")
+    except (OSError, IndexError):
+        art = ["(no art/ folder)"]
+    aw, ah = width_of(art), len(art)
+    colors = ["cyan", "yellow", "pink", "lime", "orange", "blue", "magenta"]
+    x, y = rng.uniform(0, max(0, c.w - aw)), rng.uniform(0, max(0, c.h - ah))
+    vx, vy = rng.choice((-1, 1)) * 0.9, rng.choice((-1, 1)) * 0.35
+    color = rng.choice(colors)
+    while True:
+        x, y = x + vx, y + vy
+        hit = False
+        if x < 0 or x > c.w - aw:
+            vx, x, hit = -vx, min(max(x, 0), max(0, c.w - aw)), True
+        if y < 0 or y > c.h - ah:
+            vy, y, hit = -vy, min(max(y, 0), max(0, c.h - ah)), True
+        if hit:
+            color = rng.choice([col for col in colors if col != color])
+        c.sprite(x, y, art, color)
+        yield
+
+
+# ── 9. rain ────────────────────────────────────────────────────────────
+
+CLOUD = [r"    .--.",
+         r" .-(    )-.",
+         r"(___.__)___)"]
+WALKER = [r"  _.-^-._",
+          r" /_/_|_\_\ ",
+          r"     |",
+          r"     o",
+          r"    /|\ "]
+WALKER_LEGS = [r"    / \ ", r"     |  "]
+
+
+def rain(c, rng):
+    """Clouds drift and rain falls on someone walking under an umbrella."""
+    cw = width_of(CLOUD)
+    clouds = [[rng.uniform(-cw, c.w), rng.randint(0, max(0, c.h // 4)), rng.uniform(0.05, 0.15)]
+              for _ in range(max(2, c.w // 30))]
+    drops, splashes = [], []
+    walker_x = float(-10)
+    bolt, flash = [], 0
+    t = 0
+    while walker_x < c.w + 2:
+        walker_x += 0.3
+        umbrella_top = c.h - len(WALKER) - 2
+        for cl in clouds:
+            cl[0] -= cl[2]
+            if cl[0] < -cw:
+                cl[0] = c.w
+            for _ in range(2):
+                drops.append([cl[0] + rng.uniform(0, cw), cl[1] + 3])
+        for d in drops:
+            d[0] -= 0.3
+            d[1] += 1
+        kept = []
+        for d in drops:
+            under = walker_x - 1 < d[0] < walker_x + 9 and d[1] >= umbrella_top
+            if under or d[1] >= c.h - 1:
+                splashes.append([d[0], umbrella_top - 1 if under else c.h - 1, 0])
+            else:
+                kept.append(d)
+        drops = kept
+        for s in splashes:
+            s[2] += 1
+        splashes = [s for s in splashes if s[2] < 3]
+        if not bolt and rng.random() < 0.006:
+            cl = rng.choice(clouds)
+            bx, bolt = cl[0] + cw // 2, []
+            for by in range(cl[1] + 3, c.h - 1):
+                step = rng.choice((-1, 0, 1))
+                bolt.append((bx, by, "/" if step < 0 else "\\" if step > 0 else "|"))
+                bx += step
+            flash = 5
+
+        c.put(0, c.h - 1, "_" * c.w, "dim")
+        for dx, dy in drops:
+            c.put(dx, dy, "/", "blue")
+        for sx, sy, age in splashes:
+            c.put(sx - 1, sy, "\\./" if age == 0 else ". .", "cyan")
+        if flash:
+            flash -= 1
+            if flash > 1:
+                for bx, by, ch in bolt:
+                    c.put(bx, by, ch, "yellow")
+            if not flash:
+                bolt = []
+        for cx, cy, _ in clouds:
+            c.sprite(cx, cy, CLOUD, "white" if flash else "gray")
+        c.sprite(walker_x, umbrella_top, WALKER, "white")
+        c.sprite(walker_x, umbrella_top, WALKER[:2], "red")
+        c.put(walker_x, umbrella_top + len(WALKER), WALKER_LEGS[t // 4 % 2], "white")
+        yield
+        t += 1
+
+
+# ── 10. snake ──────────────────────────────────────────────────────────
+
+
+def snake(c, rng):
+    """A snake roams the pane hunting apples until it ties itself in a knot."""
+    def free(x, y):
+        return 0 <= x < c.w and 0 <= y < c.h and (x, y) not in occupied and not c.covered(x, y)
+
+    def new_apple():
+        for _ in range(500):
+            ax, ay = rng.randrange(c.w), rng.randrange(c.h)
+            if free(ax, ay):
+                return ax, ay
+        return None
+
+    body = [(c.w // 4, c.h // 2)]
+    occupied = set(body)
+    grow, direction = 6, (1, 0)
+    apple = new_apple()
+    t = 0
+    while True:
+        # Rows are twice as tall as columns, so step up/down at half speed.
+        if direction[1] == 0 or t % 2 == 0:
+            hx, hy = body[-1]
+            options = [d for d in ((1, 0), (-1, 0), (0, 1), (0, -1))
+                       if d != (-direction[0], -direction[1]) and free(hx + d[0], hy + d[1])]
+            if not options:
+                break
+            if apple and rng.random() > 0.15:
+                options.sort(key=lambda d: abs(hx + d[0] - apple[0]) + abs(hy + d[1] - apple[1]))
+                direction = options[0] if direction not in options[:1] else direction
+            elif direction not in options or rng.random() < 0.1:
+                direction = rng.choice(options)
+            head = (hx + direction[0], hy + direction[1])
+            body.append(head)
+            occupied.add(head)
+            if head == apple:
+                grow += 5
+                apple = new_apple()
+            if grow:
+                grow -= 1
+            else:
+                occupied.discard(body.pop(0))
+        if apple:
+            c.put(apple[0], apple[1], "@", "red")
+        draw_snake(c, body)
+        yield
+        t += 1
+    for f in range(FPS * 2):
+        if f // 3 % 2:
+            draw_snake(c, body)
+        yield
+
+
+def draw_snake(c, body):
+    for i, (x, y) in enumerate(body):
+        c.put(x, y, "o", "forest" if (len(body) - i) % 4 == 0 else "green")
+    c.put(*body[-1], "O", "lime")
+
+
+SCENES = [bonsai, aquarium, rocket, train, sailboat, cat, ufo, bounce, rain, snake]
+
+
+# ── player ─────────────────────────────────────────────────────────────
+
+
+def panel_lines(scene_name, index):
+    key_w = 9
+    rows = [(key.ljust(key_w), desc) for key, desc in SHORTCUTS]
+    inner = max(len(k) + len(d) for k, d in rows) + 2
+    footer = f"{scene_name}  {index + 1}/{len(SCENES)}"
+    inner = max(inner, len(footer) + 2)
+    lines = [("╭" + "─" * inner + "╮", None)]
+    lines += [("│ " + k + d.ljust(inner - key_w - 2) + " │", k) for k, d in rows]
+    lines.append(("├" + "─" * inner + "┤", None))
+    lines.append(("│ " + footer.rjust(inner - 2) + " │", None))
+    lines.append(("╰" + "─" * inner + "╯", None))
+    return lines
+
+
+def place_panel(c, scene_name, index):
+    """Top-right corner of the pane, or None when the pane is too small."""
+    lines = panel_lines(scene_name, index)
+    pw, ph = len(lines[0][0]), len(lines)
+    if c.w < pw + 40 or c.h < ph:
+        return None
+    return c.w - pw - 1, 0, pw, ph
+
+
+def draw_panel(c, scene_name, index):
+    lines = panel_lines(scene_name, index)
+    px, py, pw, ph = c.panel
+    for i, (line, key) in enumerate(lines):
+        c.put(px - 1, py + i, " " + line + " ", "dim", opaque=True)
+        if key:
+            c.put(px + 2, py + i, key, "key")
+            c.put(px + 2 + len(key), py + i, line[2 + len(key):-2], "gray")
+        elif i == ph - 2:
+            c.put(px + 2, py + i, line[2:-2], "gray")
+
+
+def run(stdscr, order, fixed):
+    curses.curs_set(0)
+    curses.use_default_colors()
+    attrs = {None: 0}
+    for i, (name, (rich, basic)) in enumerate(PALETTE.items(), start=1):
+        curses.init_pair(i, rich if curses.COLORS >= 256 else basic, -1)
+        attrs[name] = curses.color_pair(i)
+    stdscr.timeout(1000 // FPS)
+
+    rng = random.Random()
+    pos = 0
+    show_keys, paused = True, False
+    canvas = scene = None
+    started = time.monotonic()
+
+    while True:
+        h, w = stdscr.getmaxyx()
+        if canvas is None or (canvas.w, canvas.h) != (w, h):
+            canvas = Canvas(w, h)
+            scene = None
+        # Place the panel first so scenes know where it is this frame.
+        canvas.clear()
+        name, index = order[pos].__name__, SCENES.index(order[pos])
+        canvas.panel = place_panel(canvas, name, index) if show_keys else None
+
+        if scene is None:
+            scene = order[pos](canvas, rng)
+        if not paused:
+            try:
+                next(scene)
+            except StopIteration:
+                scene = order[pos](canvas, rng)  # loop the scene
+                next(scene)
+        if canvas.panel:
+            draw_panel(canvas, name, index)
+
+        for y in range(h):
+            chars, colors = canvas.chars[y], canvas.colors[y]
+            x = 0
+            while x < w:
+                start, col = x, colors[x]
+                while x < w and colors[x] == col:
+                    x += 1
+                try:
+                    stdscr.addstr(y, start, "".join(chars[start:x]), attrs[col])
+                except curses.error:
+                    pass  # writing the bottom-right cell always "fails"
+        stdscr.refresh()
+
+        key = stdscr.getch()
+        step = 0
+        if key == ord("q"):
+            break
+        elif key in (ord("n"), ord("r"), curses.KEY_RIGHT):
+            step = 1
+        elif key in (ord("p"), curses.KEY_LEFT):
+            step = -1
+        elif key == ord(" "):
+            paused = not paused
+        elif key == ord("k"):
+            show_keys = not show_keys
+        if not fixed and not paused and time.monotonic() - started > ROTATE_SECONDS:
+            step = 1
+        if step and len(order) > 1:
+            pos = (pos + step) % len(order)
+            scene, started = None, time.monotonic()
+
+
+def main():
+    args = sys.argv[1:]
+    names = {s.__name__: s for s in SCENES}
+    if args and args[0] in ("-l", "--list"):
+        for i, s in enumerate(SCENES, 1):
+            print(f"{i:2}. {s.__name__:9} {s.__doc__}")
+        return
+    if args and args[0] not in names:
+        print(f"unknown scene {args[0]!r}; try --list", file=sys.stderr)
+        sys.exit(1)
+    if args:
+        order, fixed = [names[args[0]]], True
+    else:
+        order, fixed = SCENES[:], False
+        random.shuffle(order)
+    locale.setlocale(locale.LC_ALL, "")
+    os.environ.setdefault("ESCDELAY", "25")
+    try:
+        curses.wrapper(run, order, fixed)
+    except KeyboardInterrupt:
+        pass
+
+
+if __name__ == "__main__":
+    main()

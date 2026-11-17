@@ -1,0 +1,10 @@
+# Enter opens files in nvim instantly (see plugins/open-vim.yazi)
+[[mgr.prepend_keymap]]
+on   = "<Enter>"
+run  = "plugin open-vim"
+desc = "Enter folder or open file in nvim"
+
+[[mgr.prepend_keymap]]
+on   = "l"
+run  = "plugin open-vim"
+desc = "Enter folder or open file in nvim"

@@ -1,15 +1,20 @@
 #!/usr/bin/env bash
 # Launched by Ghostty on every new window. Builds (or reattaches to) the
-# tmux session "main" with two tabs:
+# tmux session "main" with just the home tab. Claude and developer tabs
+# open on demand with Option+c / Option+d (see bin/dev).
 #
-#   1:home                              2:dev (see bin/dev)
-#   ┌──────────────┬──────────────┐     ┌──────────────┬──────────────┐
-#   │  btop        │              │     │              │  yazi tree   │
-#   │  (CPU/RAM)   │   terminal   │     │   claude     │              │
-#   │              │              │     │              ├──────────────┤
-#   ├──────────────┤              │     │              │   terminal   │
-#   │ art  ⌥ keys  │              │     │              │              │
-#   └──────────────┴──────────────┘     └──────────────┴──────────────┘
+#   1:home
+#   ┌─────────┬───────────┬──────────────┐
+#   │ sysinfo │  procs    │   terminal   │
+#   │ cpu/mem │ apps and  │              │
+#   │ + specs │ services  │              │
+#   ├─────────┴───────────┴──────────────┤
+#   │  animated art             ⌥ keys   │
+#   │                                    │
+#   └────────────────────────────────────┘
+#
+# Home can't be closed: Option+x / Option+w refuse (see tmux.conf) and a pane
+# whose shell exits gets a fresh shell instead of disappearing.
 
 # Apps launched from the Dock don't get Homebrew on PATH.
 export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
@@ -32,18 +37,19 @@ fi
 
 cd "$HOME" || exit 1
 
-# Tab 1: home
-btop_pane=$(tmux new-session -d -s "$SESSION" -n home -c "$HOME" -P -F '#{pane_id}')
-term_pane=$(tmux split-window -h -l 50% -t "$btop_pane" -c "$HOME" -P -F '#{pane_id}')
-art_pane=$(tmux split-window -v -l 30% -t "$btop_pane" -c "$HOME" -P -F '#{pane_id}')
-tmux send-keys -t "$btop_pane" 'btop' Enter
+# Home tab. The art pane is split off first so it spans the full width.
+info_pane=$(tmux new-session -d -s "$SESSION" -n home -c "$HOME" -P -F '#{pane_id}')
+art_pane=$(tmux split-window -v -l 50% -t "$info_pane" -c "$HOME" -P -F '#{pane_id}')
+term_pane=$(tmux split-window -h -l 50% -t "$info_pane" -c "$HOME" -P -F '#{pane_id}')
+procs_pane=$(tmux split-window -h -l 58% -t "$info_pane" -c "$HOME" -P -F '#{pane_id}')
+tmux send-keys -t "$info_pane" 'sysinfo' Enter
+tmux send-keys -t "$procs_pane" 'procs' Enter
 tmux send-keys -t "$art_pane" 'home-art' Enter
 
-# Tab 2: dev. Starts as a project picker; picking a folder builds the
-# claude/tree/terminal layout there (Esc keeps home).
-dev_pane=$(tmux new-window -t "$SESSION:" -n dev -c "$HOME" -P -F '#{pane_id}')
-tmux send-keys -t "$dev_pane" 'dev --pick --here' Enter
+# Lock home: tmux.conf's close keys check @locked, and dead panes respawn.
+tmux set-option -w -t "$SESSION:home" @locked 1
+tmux set-option -w -t "$SESSION:home" remain-on-exit on
+tmux set-hook -w -t "$SESSION:home" pane-died respawn-pane
 
-tmux select-window -t "$SESSION:home"
 tmux select-pane -t "$term_pane"
 exec tmux attach-session -t "$SESSION"

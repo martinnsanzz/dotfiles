@@ -1,65 +1,143 @@
 #!/usr/bin/env bash
-# Opens a dev tab in tmux:
+# Opens a claude or developer tab in tmux:
 #
-#   ┌──────────────┬──────────────┐
-#   │              │  yazi tree   │
-#   │   claude     │ (Enter→vim)  │
-#   │              ├──────────────┤
-#   │              │ fish terminal│
-#   └──────────────┴──────────────┘
+#   claude (Option+c)                   developer (Option+d)
+#   ┌──────────────┬──────────────┐     ┌──────────┬───────────────────┐
+#   │              │  yazi tree   │     │yazi tree │                   │
+#   │   claude     │ (Enter→vim)  │     │(project) │  vim (project)    │
+#   │  (project)   │     (~)      │     │          │                   │
+#   │              ├──────────────┤     ├──────────┤  waits for a file │
+#   │              │ fish terminal│     │ terminal │  from the tree    │
+#   │              │     (~)      │     │(project) │                   │
+#   └──────────────┴──────────────┘     └──────────┴───────────────────┘
 #
-# Usage: dev [dir]     open a dev tab in dir (default: current folder)
-#        dev --pick    choose a folder with fzf first (bound to Option+d)
-#        dev --pick --here   pick, then build the tab around the current pane
-#                            (used by workspace for the startup dev tab)
+# Usage: dev claude|developer [dir]   open the tab in dir (default: current folder)
+#        dev claude|developer --pick  choose a folder with fzf first
+#        ... --pick --here   pick, then build the tab around the current pane
 # DEV_SESSION=name adds the tab to that session instead of the current one.
 
 export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
 
-pick() {
-	{
-		echo "$HOME"
-		find "$HOME/Projects" -mindepth 1 -maxdepth 2 -type d -not -path '*/.*' 2>/dev/null
-	} | sed "s|^$HOME|~|" |
-		fzf --prompt='project> ' --reverse --height=100% |
-		sed "s|^~|$HOME|"
+kind=${1:-}
+case $kind in
+claude | developer) shift ;;
+*)
+	echo "usage: dev claude|developer [--pick] [--here] [dir]" >&2
+	exit 1
+	;;
+esac
+
+pick= here= dir=
+for arg; do
+	case $arg in
+	--pick) pick=1 ;;
+	--here) here=1 ;;
+	*) dir=$arg ;;
+	esac
+done
+
+# Folder browser: starts at ~/Projects, one level at a time.
+# Enter opens the highlighted folder, → goes into it, ← goes back up.
+ROOT="$HOME/Projects"
+
+# One line per subfolder of $1; ▸ marks folders that have subfolders.
+list() {
+	local d
+	[ "$1" = "$ROOT" ] && echo "~"
+	[ "$1" != "$ROOT" ] && echo ". (this folder)"
+	for d in "$1"/*/; do
+		[ -d "$d" ] || continue
+		d=${d%/}
+		if [ -n "$(find "$d" -mindepth 1 -maxdepth 1 -type d -not -name '.*' -print -quit 2>/dev/null)" ]; then
+			echo "${d##*/} ▸"
+		else
+			echo "${d##*/}"
+		fi
+	done
 }
 
-here=
-if [ "${2:-}" = --here ]; then
-	here=1
-fi
+pick() {
+	local cur=$ROOT out key sel target
+	while :; do
+		out=$(list "$cur" | fzf --expect=right,left --reverse --height=100% \
+			--prompt="${cur/#$HOME/~}/ " --header='enter open · → into folder · ← back · esc cancel')
+		# Esc / Ctrl+c: fzf exits 130 with no output.
+		[ -n "$out" ] || return
+		key=$(sed -n 1p <<<"$out")
+		sel=$(sed -n 2p <<<"$out")
+		sel=${sel% ▸}
 
-if [ "${1:-}" = --pick ]; then
+		if [ "$key" = left ]; then
+			[ "$cur" != "$ROOT" ] && cur=$(dirname "$cur")
+			continue
+		fi
+		[ -n "$sel" ] || continue
+
+		case $sel in
+		"~") target=$HOME ;;
+		". (this folder)") target=$cur ;;
+		*) target=$cur/$sel ;;
+		esac
+
+		if [ "$key" = right ]; then
+			# Only step into real subfolders, not ~ or the current folder.
+			case $sel in "~" | ". (this folder)") ;; *) cur=$target ;; esac
+			continue
+		fi
+		echo "$target"
+		return
+	done
+}
+
+if [ -n "$pick" ]; then
 	dir=$(pick)
 	# Cancelling the picker in --here mode still builds the tab, in home.
 	if [ -z "$dir" ]; then
 		[ -n "$here" ] || exit 0
 		dir=$HOME
 	fi
-else
-	dir=${1:-$PWD}
 fi
+dir=${dir:-$PWD}
 
-name=$(basename "$dir")
-[ "$dir" = "$HOME" ] && name=dev
+# Tab name: claude:<project>, or just claude for home.
+name=$kind
+[ "$dir" != "$HOME" ] && name="$kind:$(basename "$dir")"
 
+# The first pane: claude in a claude tab, the tree in a developer tab.
 if [ -n "$here" ]; then
-	claude_pane=$TMUX_PANE
-	tmux rename-window -t "$claude_pane" "$name"
+	main=$TMUX_PANE
+	tmux rename-window -t "$main" "$name"
 else
-	claude_pane=$(tmux new-window ${DEV_SESSION:+-t "$DEV_SESSION:"} -n "$name" -c "$dir" -P -F '#{pane_id}')
+	main=$(tmux new-window ${DEV_SESSION:+-t "$DEV_SESSION:"} -n "$name" -c "$dir" -P -F '#{pane_id}')
 fi
-tree_pane=$(tmux split-window -h -l 50% -t "$claude_pane" -c "$dir" -P -F '#{pane_id}')
-tmux split-window -v -l 40% -t "$tree_pane" -c "$dir"
 
-# send-keys (instead of running the program as the pane command) means quitting
-# claude or yazi drops back to a shell rather than closing the pane.
-if [ -n "$here" ]; then
-	# This pane's shell is still running us; these keys run once we exit.
-	tmux send-keys -t "$claude_pane" "cd $(printf %q "$dir") && clear && claude" Enter
+# Runs a program in the main pane. send-keys (instead of running it as the
+# pane command) means quitting it drops back to a shell rather than closing
+# the pane. In --here mode this pane's shell is still running us; the keys run
+# once we exit.
+start_main() {
+	if [ -n "$here" ]; then
+		tmux send-keys -t "$main" "cd $(printf %q "$dir") && clear && $1" Enter
+	else
+		tmux send-keys -t "$main" "$1" Enter
+	fi
+}
+
+if [ "$kind" = claude ]; then
+	# Only claude works in the chosen project; yazi and the terminal start in home.
+	tree_pane=$(tmux split-window -h -l 50% -t "$main" -c "$HOME" -P -F '#{pane_id}')
+	tmux split-window -v -l 40% -t "$tree_pane" -c "$HOME"
+	start_main claude
+	tmux send-keys -t "$tree_pane" 'yazi' Enter
+	tmux select-pane -t "$main"
 else
-	tmux send-keys -t "$claude_pane" 'claude' Enter
+	# Everything works in the project. The editor pane runs dev-editor, which
+	# waits for yazi (bin/yazi-vim) to send it a file. @dev-editor marks the
+	# pane and remembers the project folder.
+	editor=$(tmux split-window -h -l 70% -t "$main" -c "$dir" -P -F '#{pane_id}' \
+		"$HOME/.local/bin/dev-editor")
+	tmux set -p -t "$editor" @dev-editor "$dir"
+	tmux split-window -v -l 35% -t "$main" -c "$dir"
+	start_main yazi
+	tmux select-pane -t "$main"
 fi
-tmux send-keys -t "$tree_pane" 'yazi' Enter
-tmux select-pane -t "$claude_pane"

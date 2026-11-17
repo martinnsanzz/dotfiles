@@ -1,0 +1,341 @@
+#!/usr/bin/env python3
+"""Open apps and running services, with force quit, for the home tab.
+
+  ↑↓ / j k   move           tab / ← →   apps ⇄ services
+  x          force quit     t           quit gently (SIGTERM)
+  s          sort cpu/mem/name           /   filter (esc clears)
+  a          services: mine ⇄ every user
+  q          quit to the shell
+
+Apps are what the Dock shows; their helper processes are counted in. Services
+are every other process (yours, or with `a` everyone's, which needs sudo to
+quit).
+"""
+
+import curses
+import locale
+import os
+import re
+import signal
+import subprocess
+import time
+
+REFRESH_SECONDS = 2
+
+PALETTE = {
+    "dim": (240, curses.COLOR_WHITE),
+    "gray": (245, curses.COLOR_WHITE),
+    "white": (255, curses.COLOR_WHITE),
+    "key": (75, curses.COLOR_BLUE),
+    "yellow": (221, curses.COLOR_YELLOW),
+    "red": (203, curses.COLOR_RED),
+    "green": (71, curses.COLOR_GREEN),
+}
+
+SORTS = ("cpu", "mem", "name")
+
+# Show these by the script they run (home-art, not Python).
+INTERPRETERS = {"python", "python3", "node", "ruby", "perl", "bash", "sh", "zsh"}
+
+# Killing these logs you out or takes this whole workspace down with it.
+PROTECTED_NAMES = {"launchd", "loginwindow", "WindowServer", "kernel_task"}
+
+
+def sh(*cmd):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def protected_pids():
+    """This program, everything above it (fish, tmux, Ghostty) and the tmux server."""
+    pids = {1}
+    pid = os.getpid()
+    parents = {}
+    for line in sh("ps", "-axo", "pid=,ppid=").splitlines():
+        a, b = line.split()
+        parents[int(a)] = int(b)
+    while pid > 1 and pid not in pids:
+        pids.add(pid)
+        pid = parents.get(pid, 1)
+    server = sh("tmux", "display-message", "-p", "#{pid}").strip()
+    if server.isdigit():
+        pids.add(int(server))
+    return pids
+
+
+class Proc:
+    def __init__(self, pid, name, cpu=0.0, mem=0, uid=0, path=""):
+        self.pid, self.name, self.cpu, self.mem = pid, name, cpu, mem
+        self.uid, self.path = uid, path
+        self.helpers = 0
+
+
+def snapshot(all_users):
+    """(apps, services) right now."""
+    procs = {}
+    for line in sh("ps", "-axww", "-o", "pid=,uid=,pcpu=,rss=,comm=").splitlines():
+        parts = line.split(None, 4)
+        if len(parts) < 5:
+            continue
+        pid, uid, cpu, rss, path = parts
+        procs[int(pid)] = Proc(int(pid), os.path.basename(path), float(cpu),
+                               int(rss) * 1024, int(uid), path)
+    for line in sh("ps", "-axww", "-o", "pid=,args=").splitlines():
+        parts = line.split()
+        p = procs.get(int(parts[0])) if parts else None
+        if p and p.name.lower() in INTERPRETERS and len(parts) > 2 \
+                and not parts[2].startswith("-"):
+            p.name = os.path.basename(parts[2])
+
+    # Regular apps ("Foreground" = has a Dock icon) from Launch Services.
+    apps = []
+    for block in sh("lsappinfo", "list").split("\n\n"):
+        if 'type="Foreground"' not in block:
+            continue
+        name = re.search(r'^\s*\d+\) "(.*)"', block, re.M)
+        pid = re.search(r"pid = (\d+)", block)
+        bundle = re.search(r'bundle path="(.*)"', block)
+        if not (name and pid and int(pid.group(1)) in procs):
+            continue
+        main = procs[int(pid.group(1))]
+        app = Proc(main.pid, name.group(1), uid=main.uid,
+                   path=bundle.group(1) if bundle else main.path)
+        apps.append(app)
+
+    # Count every process living inside an app's bundle (helpers, renderers)
+    # towards that app, and keep them out of the services list.
+    in_app = set()
+    for app in apps:
+        prefix = app.path.rstrip("/") + "/"
+        for p in procs.values():
+            if p.pid == app.pid or p.path.startswith(prefix):
+                app.cpu += p.cpu
+                app.mem += p.mem
+                app.helpers += p.pid != app.pid
+                in_app.add(p.pid)
+
+    me = os.getuid()
+    services = [p for p in procs.values()
+                if p.pid not in in_app and p.pid != 0 and (all_users or p.uid == me)]
+    return apps, services
+
+
+def human(n):
+    for unit in ("B", "K", "M", "G"):
+        if n < 1024 or unit == "G":
+            return f"{n:.0f}{unit}" if unit in "BK" else f"{n:.1f}{unit}"
+        n /= 1024
+
+
+class App:
+    def __init__(self, stdscr):
+        self.s = stdscr
+        self.tab = 0  # 0 = apps, 1 = services
+        self.sort = 0
+        self.all_users = False
+        self.filter = ""
+        self.typing = False  # editing the filter
+        self.selected = [None, None]  # pid kept selected across refreshes
+        self.scroll = [0, 0]
+        self.confirm = None  # (proc, signal) waiting for y/n
+        self.message, self.message_until = "", 0
+        self.apps, self.services = [], []
+        self.protected = protected_pids()
+        self.next_refresh = 0
+
+        curses.curs_set(0)
+        curses.use_default_colors()
+        self.attrs = {}
+        for i, (name, (rich, basic)) in enumerate(PALETTE.items(), start=1):
+            curses.init_pair(i, rich if curses.COLORS >= 256 else basic, -1)
+            self.attrs[name] = curses.color_pair(i)
+        stdscr.timeout(200)
+
+    def refresh(self):
+        self.apps, self.services = snapshot(self.all_users)
+        self.next_refresh = time.monotonic() + REFRESH_SECONDS
+
+    def rows(self):
+        items = self.apps if self.tab == 0 else self.services
+        if self.filter:
+            f = self.filter.lower()
+            items = [p for p in items if f in p.name.lower()]
+        key = SORTS[self.sort]
+        if key == "name":
+            return sorted(items, key=lambda p: p.name.lower())
+        return sorted(items, key=lambda p: getattr(p, key), reverse=True)
+
+    def index(self, rows):
+        pids = [p.pid for p in rows]
+        sel = self.selected[self.tab]
+        return pids.index(sel) if sel in pids else 0
+
+    def say(self, text, seconds=3):
+        self.message, self.message_until = text, time.monotonic() + seconds
+
+    def put(self, y, x, text, color="gray", bold=False):
+        h, w = self.s.getmaxyx()
+        if 0 <= y < h and 0 <= x < w:
+            attr = self.attrs[color] | (curses.A_BOLD if bold else 0)
+            try:
+                self.s.addstr(y, x, text[:w - x], attr)
+            except curses.error:
+                pass
+
+    # ── drawing ────────────────────────────────────────────────────────
+
+    def draw(self, rows):
+        s = self.s
+        h, w = s.getmaxyx()
+        s.erase()
+
+        # Tabs
+        x = 1
+        for i, label in enumerate((f"apps {len(self.apps)}", f"services {len(self.services)}")):
+            text = f" {label} "
+            if i == self.tab:
+                self.put(0, x, text, "key", bold=True)
+                self.put(1, x, "─" * len(text), "key")
+            else:
+                self.put(0, x, text, "dim")
+            x += len(text) + 1
+        scope = "" if self.tab == 0 else (" all users" if self.all_users else " mine")
+        self.put(0, x + 1, f"by {SORTS[self.sort]}{scope}", "dim")
+
+        # Column header
+        name_w = max(8, w - 25)
+        self.put(2, 1, f"{'name':<{name_w}}{'cpu':>6}{'mem':>8}{'pid':>8}"[:w - 2], "dim")
+
+        top, bottom = 3, h - 2
+        visible = max(1, bottom - top)
+        cur = self.index(rows)
+        scroll = self.scroll[self.tab]
+        scroll = min(max(scroll, cur - visible + 1), cur)
+        self.scroll[self.tab] = max(0, scroll)
+
+        for row, p in enumerate(rows[scroll:scroll + visible]):
+            y = top + row
+            name = p.name + (f" +{p.helpers}" if p.helpers else "")
+            line = f"{name[:name_w - 1]:<{name_w}}{p.cpu:6.1f}{human(p.mem):>8}{p.pid:>8}"
+            if scroll + row == cur:
+                self.put(y, 0, "▌", "key")
+                self.put(y, 1, line[:w - 2].ljust(w - 2), "white", bold=True)
+            else:
+                hot = "red" if p.cpu >= 80 else "yellow" if p.cpu >= 30 else "gray"
+                self.put(y, 1, line[:w - 2], hot)
+        if not rows:
+            self.put(top, 1, "nothing matches" if self.filter else "nothing running", "dim")
+
+        # Footer: confirm prompt, filter, message, or the key hints.
+        if self.confirm:
+            p, sig = self.confirm
+            verb = "force quit" if sig == signal.SIGKILL else "quit"
+            self.put(h - 1, 1, f"{verb} {p.name} ({p.pid})? y/n", "red", bold=True)
+        elif self.typing or self.filter:
+            self.put(h - 1, 1, f"/{self.filter}" + ("▏" if self.typing else ""), "key")
+        elif self.message and time.monotonic() < self.message_until:
+            self.put(h - 1, 1, self.message, "yellow")
+        else:
+            hint = "x force quit  t quit  tab switch  s sort  / find"
+            if self.tab == 1:
+                hint += "  a all"
+            self.put(h - 1, 1, hint, "dim")
+        s.refresh()
+
+    # ── actions ────────────────────────────────────────────────────────
+
+    def kill(self, p, sig):
+        if p.pid in self.protected or p.name in PROTECTED_NAMES:
+            self.say(f"{p.name} keeps this workspace running; not quitting it")
+            return
+        try:
+            os.kill(p.pid, sig)
+        except ProcessLookupError:
+            self.say(f"{p.name} already exited")
+        except PermissionError:
+            self.say(f"{p.name} belongs to another user (needs sudo)")
+        else:
+            self.say(f"{'force quit' if sig == signal.SIGKILL else 'asked to quit'}: {p.name}")
+        self.next_refresh = time.monotonic() + 0.5
+
+    def key(self, ch, rows):
+        """Handle one key; returns False to exit."""
+        if self.confirm:
+            p, sig = self.confirm
+            self.confirm = None
+            if ch in (ord("y"), ord("Y")):
+                self.kill(p, sig)
+            return True
+
+        if self.typing:
+            if ch in (27, 10, 13, curses.KEY_ENTER):
+                self.typing = False
+                if ch == 27:
+                    self.filter = ""
+            elif ch in (curses.KEY_BACKSPACE, 127, 8):
+                self.filter = self.filter[:-1]
+            elif 32 <= ch < 127:
+                self.filter += chr(ch)
+            return True
+
+        cur = self.index(rows)
+        move = 0
+        if ch == ord("q"):
+            return False
+        elif ch in (curses.KEY_DOWN, ord("j")):
+            move = 1
+        elif ch in (curses.KEY_UP, ord("k")):
+            move = -1
+        elif ch in (curses.KEY_NPAGE, 4):  # PgDn / Ctrl+d
+            move = 10
+        elif ch in (curses.KEY_PPAGE, 21):  # PgUp / Ctrl+u
+            move = -10
+        elif ch in (ord("g"), curses.KEY_HOME):
+            move = -len(rows)
+        elif ch in (ord("G"), curses.KEY_END):
+            move = len(rows)
+        elif ch in (9, curses.KEY_BTAB, curses.KEY_LEFT, curses.KEY_RIGHT,
+                    ord("h"), ord("l"), ord("1"), ord("2")):
+            self.tab = {ord("1"): 0, ord("2"): 1}.get(ch, 1 - self.tab)
+        elif ch == ord("s"):
+            self.sort = (self.sort + 1) % len(SORTS)
+        elif ch == ord("a"):
+            self.all_users = not self.all_users
+            self.refresh()
+        elif ch == ord("/"):
+            self.typing, self.filter = True, ""
+        elif ch == 27:
+            self.filter = ""
+        elif ch in (ord("x"), ord("t"), curses.KEY_DC) and rows:
+            sig = signal.SIGTERM if ch == ord("t") else signal.SIGKILL
+            self.confirm = (rows[cur], sig)
+        if move and rows:
+            self.selected[self.tab] = rows[max(0, min(len(rows) - 1, cur + move))].pid
+        return True
+
+    def loop(self):
+        while True:
+            if time.monotonic() >= self.next_refresh and not self.confirm:
+                self.refresh()
+            rows = self.rows()
+            if rows and self.selected[self.tab] not in {p.pid for p in rows}:
+                self.selected[self.tab] = rows[min(self.index(rows), len(rows) - 1)].pid
+            self.draw(rows)
+            ch = self.s.getch()
+            if ch != -1 and not self.key(ch, rows):
+                return
+
+
+def main():
+    locale.setlocale(locale.LC_ALL, "")
+    os.environ.setdefault("ESCDELAY", "25")
+    try:
+        curses.wrapper(lambda stdscr: App(stdscr).loop())
+    except KeyboardInterrupt:
+        pass
+
+
+if __name__ == "__main__":
+    main()

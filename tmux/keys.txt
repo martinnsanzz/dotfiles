@@ -2,10 +2,12 @@
 
  TABS
    Option+1..9        go to tab 1..9
+   Option+c           new claude tab (pick a project)
+   Option+d           new developer tab (pick a project)
+                      enter open, → into folder, ← back
    Option+t           new shell tab
-   Option+d           new dev tab (pick a project)
    Option+r           rename tab
-   Option+Shift+w     close tab
+   Option+x           close tab (home can't be closed)
 
  PANES
    Option+arrows      move left/down/up/right
@@ -21,23 +23,35 @@
    v then y           select, copy to clipboard
    q                  back to normal
 
- HOME TAB ART
-   r                  new random art (art pane focused)
+ HOME TAB APPS / SERVICES (procs pane focused)
+   j/k  tab           move, switch apps ⇄ services
+   x                  force quit (asks y/n)
+   t                  quit gently
+   s  /  a            sort, filter, services of all users
+
+ HOME TAB ART (art pane focused)
+   n / p              next / previous animation
+   space              pause
+   k                  hide / show the shortcuts box
    q                  quit to shell (type home-art to restart)
 
  YAZI (file tree)
    j/k  h/l           down/up, parent/enter folder
-   Enter              open file in vim
+   Enter              open file in nvim
+                      (developer tab: in the right pane)
    a  r  d            create, rename, trash
    Space  y  x  p     select, copy, cut, paste
    .                  show/hide hidden files
 
- VIM
+ NVIM
+   Option+n           every nvim shortcut
+   Space (in nvim)    shows what can follow
    i  Esc             type / stop typing
-   :w  :q  :wq  :q!   save, quit, both, quit without saving
-   u  Ctrl+r          undo / redo
+   Ctrl+s  :q         save, close
 
  OTHER
+   Option+/           this list
+   Option+n           nvim shortcuts
    Ctrl+b r           reload tmux config
    Ctrl+b d           detach (session keeps running)
    Cmd+Shift+r        reload Ghostty config
