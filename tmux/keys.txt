@@ -8,9 +8,8 @@
    Option+Shift+w     close tab
 
  PANES
-   Option+h/j/k/l     move left/down/up/right
-   Option+arrows      move (same as above)
-   Option+Shift+h/j/k/l  resize
+   Option+arrows      move left/down/up/right
+   Option+Shift+arrows   resize
    Option+z           zoom pane to full tab (toggle)
    Option+v           split side by side
    Option+s           split top/bottom

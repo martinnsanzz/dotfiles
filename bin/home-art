@@ -1,29 +1,75 @@
 #!/usr/bin/env bash
-# Shows a random ASCII art from the repo's art/ folder next to system info
-# (fastfetch). Redraws when the pane is resized.
+# Shows a random ASCII art from the repo's art/ folder next to the main
+# shortcuts, centered in the pane. Redraws when the pane is resized.
 #   r = new random art    q = quit to the shell
 # Add art by dropping a .txt file into art/.
-
-export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 
 # Follow the ~/.local/bin symlink back into the repo to find art/.
 self=$(readlink "$0" || echo "$0")
 ART_DIR=${ART_DIR:-$(cd "$(dirname "$self")/../art" && pwd)}
 
 arts=("$ART_DIR"/*.txt)
-art=""
+art_lines=()
+
+KEY=$'\e[1;34m' DIM=$'\e[38;5;245m' ART=$'\e[36m' RESET=$'\e[0m'
+
+# key|description — keys are padded by hand: printf counts ⌥ and arrows as
+# several bytes, so %-Ns padding would misalign them.
+shortcuts=(
+	"⌥ 1-9    |switch tab"
+	"⌥ ←↑↓→   |move pane"
+	"⌥⇧←↑↓→   |resize pane"
+	"⌥ z      |zoom pane"
+	"⌥ t / d  |new tab / dev tab"
+	"⌥ v / s  |split  │ / ─"
+	"⌥ w      |close pane"
+	"⌥ u      |scroll history"
+	"⌥ ?      |all shortcuts"
+	"r        |new art"
+)
+SHORTCUTS_WIDTH=28
+GAP=5
 
 draw() {
-	clear
-	if command -v fastfetch >/dev/null 2>&1; then
-		fastfetch --logo "$art" --logo-type file
-	else
-		cat "$art"
+	local cols lines art_w=0 line i
+	cols=$(tput cols) lines=$(tput lines)
+	for line in "${art_lines[@]}"; do
+		[ ${#line} -gt $art_w ] && art_w=${#line}
+	done
+
+	# Drop the shortcut column if the pane is too narrow for both.
+	local show_keys=1 total_w=$((art_w + GAP + SHORTCUTS_WIDTH))
+	if [ $total_w -gt "$cols" ]; then
+		show_keys=0 total_w=$art_w
 	fi
+
+	local rows=${#art_lines[@]}
+	[ $show_keys = 1 ] && [ ${#shortcuts[@]} -gt "$rows" ] && rows=${#shortcuts[@]}
+
+	local top=$(((lines - rows) / 2)) left=$(((cols - total_w) / 2))
+	[ $top -lt 0 ] && top=0
+	[ $left -lt 0 ] && left=0
+	local pad
+	pad=$(printf '%*s' "$left" '')
+
+	clear
+	for ((i = 0; i < top; i++)); do echo; done
+	for ((i = 0; i < rows; i++)); do
+		printf '%s%s%-*s%s' "$pad" "$ART" "$art_w" "${art_lines[i]:-}" "$RESET"
+		if [ $show_keys = 1 ] && [ $i -lt ${#shortcuts[@]} ]; then
+			local entry=${shortcuts[i]}
+			printf '%*s%s%s%s %s%s%s' "$GAP" '' "$KEY" "${entry%%|*}" "$RESET" "$DIM" "${entry#*|}" "$RESET"
+		fi
+		echo
+	done
 }
 
 new_art() {
-	art=${arts[RANDOM % ${#arts[@]}]}
+	local file=${arts[RANDOM % ${#arts[@]}]} line
+	art_lines=()
+	while IFS= read -r line || [ -n "$line" ]; do
+		art_lines+=("$line")
+	done <"$file"
 	draw
 }
 

@@ -1,19 +1,19 @@
 # dotfiles
 
-My keyboard-driven terminal setup for macOS. Opening Ghostty gives this workspace automatically, with numbered tabs in the bottom bar:
+My keyboard-driven terminal setup for macOS. Opening Ghostty gives this workspace automatically, in a slightly see-through window with numbered tabs in the top bar:
 
 ```
- 1:home                                2:dev
+ 1 home  2 dev
 ┌──────────────┬──────────────┐     ┌──────────────┬──────────────┐
 │  btop        │              │     │              │  yazi tree   │
-│  (CPU/RAM)   │              │     │   claude     │ (Enter→vim)  │
-├──────────────┤   terminal   │     │              ├──────────────┤
-│  ASCII art   │              │     │              │   terminal   │
-│  + sys info  │              │     │              │              │
+│  (CPU/RAM)   │   terminal   │     │   claude     │ (Enter→vim)  │
+│              │              │     │              ├──────────────┤
+├──────────────┤              │     │              │   terminal   │
+│ art  ⌥ keys  │              │     │              │              │
 └──────────────┴──────────────┘     └──────────────┴──────────────┘
 ```
 
-`Option+1` / `Option+2` switch tabs and `Option+h/j/k/l` move between panes. `Option+d` opens another dev tab for any project. `Option+?` shows every shortcut.
+`Option+1` / `Option+2` switch tabs and `Option+arrows` move between panes. `Option+d` opens another dev tab for any project. `Option+?` shows every shortcut.
 
 ## Install
 
@@ -33,27 +33,27 @@ Then open Ghostty (`open -a Ghostty`). `./install.sh links` only re-creates the 
 | [yazi](https://yazi-rs.github.io) | A terminal file manager. | The file tree. Enter opens a file in vim. |
 | vim | The text editor. | Editing files (`vim/vimrc`, no plugins). |
 | [Claude Code](https://claude.com/claude-code) | AI coding assistant. | The left pane of each dev tab. |
-| [btop](https://github.com/aristocratos/btop) | A live system monitor. | CPU, memory, disk, network and processes on the home tab. |
-| [fastfetch](https://github.com/fastfetch-cli/fastfetch) | A system info printer. | Draws the ASCII art next to the macOS, chip, memory and battery info. |
+| [btop](https://github.com/aristocratos/btop) | A live system monitor. | CPU and memory on the home tab, trimmed down with a plain gray/blue theme. |
 | [fzf](https://github.com/junegunn/fzf) | A fuzzy finder. | The project picker behind `Option+d`. |
 | fish | The shell. | Every terminal pane. |
 | Homebrew | The macOS package manager. | `install.sh` uses it to install everything. |
 
 ### How it fits together
 
-1. `ghostty/config` sets `command = .../workspace`, so every Ghostty window runs that script instead of a plain shell. `macos-option-as-alt` makes the Option key work for tmux shortcuts.
+1. `ghostty/config` sets `command = .../workspace`, so every Ghostty window runs that script instead of a plain shell. `macos-option-as-alt` makes the Option key work for tmux shortcuts, and `background-opacity` makes the window see-through.
 2. `bin/workspace` creates the tmux session `main` with the home tab, then calls `bin/dev` to add the dev tab. If `main` already exists, it reattaches instead. That's why closing Ghostty loses nothing.
 3. `bin/dev [folder]` builds a claude/tree/terminal tab. `dev --pick` shows an fzf list of `~` and the folders in `~/Projects` first.
-4. `bin/home-art` picks a random file from `art/` and draws it with fastfetch. It redraws when the pane is resized.
-5. yazi's `edit` opener (`yazi/yazi.toml`) runs vim inside the yazi pane. Quitting vim brings the tree back.
-6. `install.sh` symlinks each file in this repo to the place the app reads it from. Editing a file here changes the live config.
+4. `bin/home-art` picks a random file from `art/` and draws it centered, next to the main shortcuts. It redraws when the pane is resized.
+5. `btop/btop.conf` limits btop to CPU and memory and sets `save_config_on_exit = false`, so btop never rewrites the file in the repo.
+6. yazi's `edit` opener (`yazi/yazi.toml`) runs vim inside the yazi pane. Quitting vim brings the tree back.
+7. `install.sh` symlinks each file in this repo to the place the app reads it from. Editing a file here changes the live config.
 
 | Repo file | Linked to |
 |---|---|
 | `ghostty/config` | `~/.config/ghostty/config` |
 | `tmux/tmux.conf`, `tmux/keys.txt` | `~/.config/tmux/` |
 | `yazi/yazi.toml` | `~/.config/yazi/yazi.toml` |
-| `fastfetch/config.jsonc` | `~/.config/fastfetch/config.jsonc` |
+| `btop/btop.conf`, `btop/themes/plain.theme` | `~/.config/btop/` |
 | `vim/vimrc` | `~/.vimrc` |
 | `bin/*` | `~/.local/bin/` |
 
@@ -79,8 +79,8 @@ The same list opens with `Option+?` (in `tmux/keys.txt`). Option is the ⌥ key.
 
 | Keys | Action |
 |---|---|
-| `Option+h/j/k/l` or `Option+arrows` | Move left/down/up/right |
-| `Option+Shift+h/j/k/l` | Resize |
+| `Option+arrows` | Move left/down/up/right |
+| `Option+Shift+arrows` | Resize |
 | `Option+z` | Zoom pane to the full tab (toggle) |
 | `Option+v` / `Option+s` | Split side by side / top-bottom |
 | `Option+w` | Close pane |

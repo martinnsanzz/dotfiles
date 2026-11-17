@@ -5,10 +5,10 @@
 #   1:home                              2:dev (see bin/dev)
 #   ┌──────────────┬──────────────┐     ┌──────────────┬──────────────┐
 #   │  btop        │              │     │              │  yazi tree   │
-#   │  (CPU/RAM)   │              │     │   claude     │              │
-#   ├──────────────┤   terminal   │     │              ├──────────────┤
-#   │  ASCII art   │              │     │              │   terminal   │
-#   │  + sys info  │              │     │              │              │
+#   │  (CPU/RAM)   │   terminal   │     │   claude     │              │
+#   │              │              │     │              ├──────────────┤
+#   ├──────────────┤              │     │              │   terminal   │
+#   │ art  ⌥ keys  │              │     │              │              │
 #   └──────────────┴──────────────┘     └──────────────┴──────────────┘
 
 # Apps launched from the Dock don't get Homebrew on PATH.
@@ -35,7 +35,7 @@ cd "$HOME" || exit 1
 # Tab 1: home
 btop_pane=$(tmux new-session -d -s "$SESSION" -n home -c "$HOME" -P -F '#{pane_id}')
 term_pane=$(tmux split-window -h -l 50% -t "$btop_pane" -c "$HOME" -P -F '#{pane_id}')
-art_pane=$(tmux split-window -v -l 50% -t "$btop_pane" -c "$HOME" -P -F '#{pane_id}')
+art_pane=$(tmux split-window -v -l 30% -t "$btop_pane" -c "$HOME" -P -F '#{pane_id}')
 tmux send-keys -t "$btop_pane" 'btop' Enter
 tmux send-keys -t "$art_pane" 'home-art' Enter
 

@@ -9,6 +9,10 @@ window-padding-x = 6
 window-padding-y = 4
 window-padding-balance = true
 
+# Slightly see-through window with a blur of what's behind it
+background-opacity = 0.85
+background-blur = 20
+
 # Let Option act as Alt so tmux's Alt+arrow pane switching works
 macos-option-as-alt = true
 
