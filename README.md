@@ -32,7 +32,7 @@ My keyboard-driven terminal setup for macOS. Opening Ghostty gives this workspac
 └──────────────────────────────┴──────────┘
 ```
 
-- **calendar** (`bin/calendar`): a day / week / month / year calendar. Move with the arrow keys, press `a` to add an event on the selected day, `e` to edit one, `x` to delete it. See [Calendar tab](#calendar-tab).
+- **calendar** (`bin/calendar`): a day / week / month / year calendar. Move with the arrow keys, press `a` to add an event on the selected day (timed, all-day, or with just a start time), `e` to edit one, `x` to delete it. See [Calendar tab](#calendar-tab).
 - **today** (`bin/calendar-today`): today's events with their times, all-day ones first. The one happening now is green, past ones are dimmed, and the bottom says how long until the next one. On a free day it says "Nothing today".
 
 Both read and write the Mac's own Calendar, which syncs with iCloud, so the iPhone sees what you add here and the other way round.
@@ -145,7 +145,19 @@ Tab 2 (`Option+2`) is a calendar for the Mac's Calendar app. It can't be closed;
 | `?` | Every key |
 | Mouse | Click a day to select it, double-click to add, scroll to page; click the view names at the top |
 
-**Adding or editing** opens a small form: Title, All day, Date, then Starts/Ends (timed) or Until (all-day, for events over several days), and Where. `Tab`/`↓` next field, `↑` back, `Space` toggles all day, `Enter` saves, `Esc` cancels, `Ctrl+u` clears a field. Times can be typed as `9`, `930`, `9:30` or `14.30`; an end time before the start means the next day. Leave Ends empty (`Ctrl+u`) or type `N/A` when there's no end time: the event shows just its start time (`18:00`) here and on the iPhone. New events go to your default calendar. Read-only calendars (Birthdays, subscribed holidays) are shown but can't be edited. For a repeating event only that one occurrence changes.
+**Adding or editing** opens a small form: Title, All day, Date, then Starts/Ends (timed) or Until (all-day, for events over several days), and Where. `Tab`/`↓` next field, `↑` back, `Space` toggles all day, `Enter` saves, `Esc` cancels, `Ctrl+u` clears a field. Times can be typed as `9`, `930`, `9:30` or `14.30`; an end time before the start means the next day. New events go to your default calendar. Read-only calendars (Birthdays, subscribed holidays) are shown but can't be edited. For a repeating event only that one occurrence changes.
+
+### Events without an end time
+
+When you know when something starts but not when it ends, leave **Ends** empty:
+
+1. Press `a` (or `e` on an existing event) and `Tab` down to **Ends**.
+2. Press `Ctrl+u` to clear it, or type `N/A` (`na`, `-` and `?` work too). While you're on that field, the form's hint says "empty = no end time".
+3. Press `Enter` to save.
+
+The event then shows only its start time, `18:00` instead of `18:00–19:00`, in every view, in the Today pane and on the iPhone. In the Today pane it's green for its first minute, then dimmed as past. Editing it later opens with Ends empty again; type a time there to give it an end.
+
+Apple's calendars always need an end time, so behind the scenes the event ends the moment it starts. That's what Calendar on the Mac and the iPhone show as just a start time too. New events still start with a one-hour end time filled in, so normal events take no extra keys.
 
 ### iPhone sync
 
