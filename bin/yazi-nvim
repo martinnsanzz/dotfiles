@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Opens a file in nvim in the yazi pane's place. Called by yazi's open-vim plugin.
+# Opens a file in nvim in the yazi pane's place. Called by yazi's open-nvim plugin.
 #
 # yazi can run nvim inside its own pane, but handing the terminal over takes
 # about 5 seconds in yazi 26. Instead nvim starts in a hidden tmux session and
 # swaps into the tree's spot; quitting nvim swaps yazi back.
 #
-# Usage: yazi-vim <file>   (run from inside the yazi pane)
+# Usage: yazi-nvim <file>   (run from inside the yazi pane)
 
 export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
 

@@ -5,6 +5,6 @@ function Entity:click(event, up)
 	end
 	ya.emit("reveal", { self._file.url })
 	if not self._file.cha.is_dir then
-		ya.emit("plugin", { "open-vim" })
+		ya.emit("plugin", { "open-nvim" })
 	end
 end

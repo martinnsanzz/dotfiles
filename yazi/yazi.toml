@@ -5,7 +5,7 @@ ratio = [1, 2, 3]      # parent, current folder, preview of the hovered file
 sort_dir_first = true
 show_hidden = true
 
-# Enter and clicks go through plugins/open-vim.yazi instead (instant).
+# Enter and clicks go through plugins/open-nvim.yazi instead (instant).
 # This opener is the fallback for `o` and for yazi outside tmux.
 [opener]
 edit = [

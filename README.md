@@ -52,7 +52,7 @@ git clone git@github.com:martinnsanzz/dotfiles.git ~/Projects/Claude/dotfiles
 ~/Projects/Claude/dotfiles/install.sh
 ```
 
-Then open Ghostty (`open -a Ghostty`). `./install.sh links` only re-creates the symlinks and `./install.sh tools` only installs the tools. Any config that already exists is moved to `<name>.bak-<timestamp>` before it gets replaced.
+`install.sh` also clones [nvim-config](https://github.com/martinnsanzz/nvim-config) next to this repo (`~/Projects/Claude/nvim-config`) if it isn't there yet. Then open Ghostty (`open -a Ghostty`). `./install.sh links` only re-creates the symlinks and `./install.sh tools` only installs the tools. Any config that already exists is moved to `<name>.bak-<timestamp>` before it gets replaced.
 
 ## The tools
 
@@ -61,7 +61,7 @@ Then open Ghostty (`open -a Ghostty`). `./install.sh links` only re-creates the 
 | [Ghostty](https://ghostty.org) | The terminal app. | It's the window. On launch it runs `bin/workspace`. |
 | [tmux](https://github.com/tmux/tmux) | A terminal multiplexer. | Tabs (tmux "windows") and panes. The session keeps running after Ghostty closes. |
 | [yazi](https://yazi-rs.github.io) | A terminal file manager. | The file tree in claude tabs. Hovering a file previews it; Enter or a click opens it in nvim. |
-| [Neovim](https://neovim.io) | The text editor. | Set up like VS Code, in its own repo: [nvim-config](../nvim-config). It fills the whole developer tab. `vim/vimrc` stays for plain `vim`. |
+| [Neovim](https://neovim.io) | The text editor. | Set up like VS Code, in its own repo: [nvim-config](https://github.com/martinnsanzz/nvim-config). It fills the whole developer tab and opens files from the yazi tree. |
 | [Claude Code](https://claude.com/claude-code) | AI coding assistant. | The left pane of each claude tab. |
 | [btop](https://github.com/aristocratos/btop) | A live system monitor. | Not on the home tab any more; run `btop` for the full view (plain gray/blue theme). |
 | [fzf](https://github.com/junegunn/fzf) | A fuzzy finder. | The project picker behind `Option+c` and `Option+d`. |
@@ -75,7 +75,7 @@ Then open Ghostty (`open -a Ghostty`). `./install.sh links` only re-creates the 
 3. `bin/dev claude [folder]` builds a claude/tree/terminal tab, and `bin/dev developer [folder]` opens a tab running `nvim .` in the folder. With `--pick` it first shows an fzf list of `~` and the folders in `~/Projects`.
 4. `bin/home-art` plays looping ASCII animations across the bottom of the home tab, with the main shortcuts boxed in its top-right corner. It's Python (curses, standard library only), using the `python3` that comes with the Xcode command line tools.
 5. `bin/sysinfo` and `bin/procs` fill the top-left of home. Both are Python curses like `home-art`. sysinfo reads CPU ticks straight from the kernel, procs reads `ps` and `lsappinfo` every 2 seconds. `btop/btop.conf` is kept for running btop by hand.
-6. yazi's `open-vim` plugin (`yazi/plugins/`, bound in `yazi/keymap.toml` and `yazi/init.lua`) opens files with `bin/yazi-vim`, which swaps nvim into the tree's pane right away; quitting nvim brings the tree back. (yazi's built-in way of running an editor in its pane takes about 5 seconds to start.)
+6. yazi's `open-nvim` plugin (`yazi/plugins/`, bound in `yazi/keymap.toml` and `yazi/init.lua`) opens files with `bin/yazi-nvim`, which swaps nvim into the tree's pane right away; quitting nvim brings the tree back. (yazi's built-in way of running an editor in its pane takes about 5 seconds to start.)
 7. `bin/flash` shows a short message in a centered tmux popup. `Ctrl+b r` uses it to confirm the tmux config reloaded. Ghostty's `Cmd+Shift+R` reloads Ghostty and then types a private key code that tmux binds (`User0`) to the same popup.
 8. `install.sh` symlinks each file in this repo to the place the app reads it from. Editing a file here changes the live config.
 
@@ -83,10 +83,9 @@ Then open Ghostty (`open -a Ghostty`). `./install.sh links` only re-creates the 
 |---|---|
 | `ghostty/config` | `~/.config/ghostty/config` |
 | `tmux/tmux.conf`, `tmux/keys.txt` | `~/.config/tmux/` |
-| `yazi/yazi.toml`, `keymap.toml`, `init.lua`, `plugins/open-vim.yazi` | `~/.config/yazi/` |
+| `yazi/yazi.toml`, `keymap.toml`, `init.lua`, `plugins/open-nvim.yazi` | `~/.config/yazi/` |
 | `btop/btop.conf`, `btop/themes/plain.theme` | `~/.config/btop/` |
-| `vim/vimrc` | `~/.vimrc` |
-| `../nvim-config` (separate repo) | `~/.config/nvim` |
+| [nvim-config](https://github.com/martinnsanzz/nvim-config) (separate repo, cloned next to this one) | `~/.config/nvim` |
 | `bin/*` | `~/.local/bin/` |
 
 ## Home tab panes
@@ -170,7 +169,7 @@ The mouse still works as a fallback.
 
 ### nvim
 
-`Option+n` opens the full nvim cheat sheet (`keys.txt` in the nvim-config repo); `Space ?` shows the same list inside nvim. The basics:
+`Option+n` opens the full nvim cheat sheet (`keys.txt` in the [nvim-config](https://github.com/martinnsanzz/nvim-config) repo); `Space ?` shows the same list inside nvim. The basics:
 
 | Keys | Action |
 |---|---|
@@ -181,7 +180,7 @@ The mouse still works as a fallback.
 | `F5` | Run this file |
 | `Space` (wait) | Shows everything that can follow |
 
-Run `vimtutor` in the terminal for a 30-minute interactive lesson.
+Run `nvim +Tutor` in the terminal for a 30-minute interactive lesson.
 
 ### Other
 

@@ -5,10 +5,9 @@ set -euo pipefail
 
 DOTFILES="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# nvim lives in its own repo, next to this one. Set NVIM_CONFIG_REPO to the
-# repo's git URL so a fresh machine can clone it.
+# nvim lives in its own repo, next to this one; a fresh machine clones it.
 NVIM_CONFIG="${NVIM_CONFIG:-$(dirname "$DOTFILES")/nvim-config}"
-NVIM_CONFIG_REPO="${NVIM_CONFIG_REPO:-}"
+NVIM_CONFIG_REPO="${NVIM_CONFIG_REPO:-git@github.com:martinnsanzz/nvim-config.git}"
 
 install_tools() {
 	if ! command -v brew >/dev/null 2>&1; then
@@ -44,10 +43,6 @@ link() {
 # ~/.config/nvim -> the nvim-config repo (cloned first if it's missing)
 link_nvim() {
 	if [ ! -d "$NVIM_CONFIG" ]; then
-		if [ -z "$NVIM_CONFIG_REPO" ]; then
-			echo "skip    ~/.config/nvim ($NVIM_CONFIG missing; set NVIM_CONFIG_REPO to clone it)"
-			return
-		fi
 		git clone "$NVIM_CONFIG_REPO" "$NVIM_CONFIG"
 	fi
 	local dest="$HOME/.config/nvim"
@@ -70,10 +65,9 @@ link_configs() {
 	link yazi/yazi.toml   "$HOME/.config/yazi/yazi.toml"
 	link yazi/keymap.toml "$HOME/.config/yazi/keymap.toml"
 	link yazi/init.lua    "$HOME/.config/yazi/init.lua"
-	link yazi/plugins/open-vim.yazi "$HOME/.config/yazi/plugins/open-vim.yazi"
+	link yazi/plugins/open-nvim.yazi "$HOME/.config/yazi/plugins/open-nvim.yazi"
 	link btop/btop.conf   "$HOME/.config/btop/btop.conf"
 	link btop/themes/plain.theme "$HOME/.config/btop/themes/plain.theme"
-	link vim/vimrc        "$HOME/.vimrc"
 	link_nvim
 	for script in "$DOTFILES"/bin/*; do
 		chmod +x "$script"
