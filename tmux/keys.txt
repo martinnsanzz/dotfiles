@@ -36,6 +36,13 @@
    mouse              click day, double-click adds
    ?                  every calendar key
 
+ TO-DO LIST (calendar tab, bottom right)
+   j/k  g/G           move, first / last
+   a   e / Enter      add, edit (Text, Due, Flag)
+   space   f          done / not done, flag
+   x / Delete         delete (asks y/n)
+   form: due = tom, fri, 14, 25/11 or 2027-03-14
+
  HOME TAB APPS / SERVICES (procs pane focused)
    j/k  tab           move, switch apps ⇄ services
    x                  force quit (asks y/n)

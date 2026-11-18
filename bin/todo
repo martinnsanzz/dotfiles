@@ -1,0 +1,619 @@
+#!/usr/bin/env python3
+"""The to-do list, for the bottom-right pane of the calendar tab.
+
+  j/k ↑↓     move                    g / G    top / bottom
+  a          add a to-do             e/Enter  edit it
+  space      done / not done         f        flag / unflag
+  x/Delete   delete it (asks y/n)    r        re-read the file
+  mouse      click a row to select it, click its box to tick it, wheel moves
+
+To-dos live in ~/.local/share/todo.txt, one per line, readable by hand:
+
+  [ ] Pay rent  due:2026-11-20  !
+  [x] Email Ana  done:2026-11-18
+
+Flagged ones come first, then by due date, then the rest in the order they
+were added. Done ones sink to the bottom and are deleted at midnight. Edits
+made to the file by hand show up within a second.
+"""
+
+import calendar as cal_mod
+import curses
+import datetime as dt
+import locale
+import os
+import tempfile
+import time
+import unicodedata
+
+FILE = os.path.expanduser("~/.local/share/todo.txt")
+
+PALETTE = {
+    "dim": (240, curses.COLOR_WHITE),
+    "gray": (245, curses.COLOR_WHITE),
+    "white": (255, curses.COLOR_WHITE),
+    "key": (75, curses.COLOR_BLUE),
+    "yellow": (221, curses.COLOR_YELLOW),
+    "red": (203, curses.COLOR_RED),
+    "green": (114, curses.COLOR_GREEN),
+}
+SEL_BG = 237  # background of the selected to-do
+
+WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+DAY_NAMES = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+MONTHS = ("", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+KEYS = [("j/k", "move"), ("a", "add"), ("e", "edit"), ("spc", "done"), ("f", "flag"),
+        ("x", "delete"), ("g/G", "top/end"), ("r", "reload")]
+
+
+# ── the file ───────────────────────────────────────────────────────────
+
+class Item:
+    def __init__(self, text, done=False, done_on=None, due=None, flag=False):
+        self.text, self.done, self.done_on, self.due, self.flag = text, done, done_on, due, flag
+
+    @classmethod
+    def parse(cls, line):
+        s = line.strip()
+        done = False
+        if s[:3].lower() in ("[ ]", "[x]"):
+            done, s = s[1].lower() == "x", s[3:]
+        item, words = cls("", done), []
+        for word in s.split():
+            key, _, value = word.partition(":")
+            if key in ("due", "done") and value:
+                try:
+                    setattr(item, "due" if key == "due" else "done_on", dt.date.fromisoformat(value))
+                    continue
+                except ValueError:
+                    pass
+            if word == "!":
+                item.flag = True
+            else:
+                words.append(word)
+        item.text = " ".join(words)
+        return item
+
+    def line(self):
+        out = ("[x] " if self.done else "[ ] ") + self.text
+        if self.due:
+            out += f"  due:{self.due}"
+        if self.done and self.done_on:
+            out += f"  done:{self.done_on}"
+        return out + ("  !" if self.flag else "")
+
+
+def read_items():
+    try:
+        with open(FILE, encoding="utf-8") as f:
+            return [Item.parse(line) for line in f if line.strip()]
+    except FileNotFoundError:
+        return []
+
+
+def write_items(items):
+    os.makedirs(os.path.dirname(FILE), exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(FILE), prefix=".todo.")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.writelines(item.line() + "\n" for item in items)
+    os.replace(tmp, FILE)
+
+
+def ordered(items):
+    """Flagged, then by due date, then file order; done ones last."""
+    open_ = sorted((i for i in items if not i.done),
+                   key=lambda i: (not i.flag, i.due is None, i.due or dt.date.max))
+    return open_ + [i for i in items if i.done]
+
+
+# ── dates and text ─────────────────────────────────────────────────────
+
+def parse_due(s, today):
+    """'tom', 'fri', '14', '25/11', '2027-03-14' -> date; '' -> None.
+    Raises ValueError for anything else."""
+    s = s.strip().lower()
+    if not s:
+        return None
+    if s in ("today", "tod"):
+        return today
+    if s in ("tomorrow", "tom", "tmr"):
+        return today + dt.timedelta(days=1)
+    if len(s) >= 2:
+        for i, name in enumerate(DAY_NAMES):
+            if name.startswith(s):
+                return today + dt.timedelta(days=(i - today.weekday()) % 7)
+    try:
+        if len(s) == 10 and s[4] == "-":
+            return dt.date.fromisoformat(s)
+        if "/" in s:
+            day, _, month = s.partition("/")
+            d = dt.date(today.year, int(month), int(day))
+            return d if d >= today else d.replace(year=today.year + 1)
+        if s.isdigit():
+            y, m = today.year, today.month
+            for _ in range(12):  # this month, or the next one that has that day
+                if int(s) <= cal_mod.monthrange(y, m)[1] and dt.date(y, m, int(s)) >= today:
+                    return dt.date(y, m, int(s))
+                y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    except ValueError:
+        pass
+    raise ValueError("due looks like tom, fri, 14 or 25/11")
+
+
+def due_label(d, today):
+    """(text, color) for a due date."""
+    n = (d - today).days
+    if n < 0:
+        return f"{-n}d late", "red"
+    if n == 0:
+        return "today", "yellow"
+    if n == 1:
+        return "tomorrow", "white"
+    if n < 7:
+        return WEEKDAYS[d.weekday()], "gray"
+    return f"{d.day} {MONTHS[d.month]}" + (f" {d.year}" if d.year != today.year else ""), "gray"
+
+
+def xterm(hexcolor):
+    try:
+        r, g, b = (int(hexcolor[i:i + 2], 16) for i in (1, 3, 5))
+    except (ValueError, TypeError):
+        return 75
+    level = lambda v: 0 if v < 48 else 1 if v < 115 else (v - 35) // 40
+    return 16 + 36 * level(r) + 6 * level(g) + level(b)
+
+
+def width(text):
+    return sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in text)
+
+
+def clip(text, n):
+    """Cuts text to n terminal columns (wide characters count double)."""
+    if n <= 0:
+        return ""
+    if width(text) <= n:
+        return text
+    out, used = "", 0
+    for c in text:
+        cw = 2 if unicodedata.east_asian_width(c) in "WF" else 1
+        if used + cw > n - 1:
+            break
+        out, used = out + c, used + cw
+    return out + "…"
+
+
+# ── add / edit form ────────────────────────────────────────────────────
+
+LABELS = {"text": "Text", "due": "Due", "flag": "Flag"}
+FIELDS = ("text", "due", "flag")
+
+
+class Form:
+    def __init__(self, item=None):
+        self.item = item
+        self.error = ""
+        self.v = {"text": item.text if item else "",
+                  "due": item.due.isoformat() if item and item.due else "",
+                  "flag": item.flag if item else False}
+        self.focus = 0
+
+    def current(self):
+        return FIELDS[self.focus]
+
+    def values(self, today):
+        """(text, due, flag), or raises ValueError."""
+        text = " ".join(self.v["text"].split())
+        if not text:
+            raise ValueError("give it a text")
+        return text, parse_due(self.v["due"], today), self.v["flag"]
+
+
+# ── the app ────────────────────────────────────────────────────────────
+
+class App:
+    def __init__(self, stdscr):
+        self.s = stdscr
+        self.today = dt.date.today()
+        self.items = []
+        self.mtime = -1  # of the file when last read or written; None if missing
+        self.sel = 0  # index into ordered(self.items)
+        self.top = 0  # first row shown
+        self.form = None
+        self.confirm = None  # item waiting for y/n to delete
+        self.message, self.message_until = "", 0
+        self.rows = {}  # screen y -> item index, from the last draw
+
+        curses.curs_set(0)
+        curses.use_default_colors()
+        self.rich = curses.COLORS >= 256
+        self.pairs = {}
+        curses.mousemask(curses.ALL_MOUSE_EVENTS)
+        curses.mouseinterval(0)
+        stdscr.timeout(1000)
+
+    def pair(self, fg, bg=-1):
+        key = (fg, bg)
+        if key not in self.pairs:
+            n = len(self.pairs) + 1
+            if n >= curses.COLOR_PAIRS:
+                return 0
+            curses.init_pair(n, fg, bg)
+            self.pairs[key] = curses.color_pair(n)
+        return self.pairs[key]
+
+    def color(self, name_or_hex, bg=-1):
+        if isinstance(name_or_hex, str) and name_or_hex.startswith("#"):
+            fg = xterm(name_or_hex) if self.rich else curses.COLOR_CYAN
+        else:
+            rich, basic = PALETTE[name_or_hex]
+            fg = rich if self.rich else basic
+        if bg != -1 and not self.rich:
+            bg = curses.COLOR_BLACK
+        return self.pair(fg, bg)
+
+    def put(self, y, x, text, color="gray", bold=False, bg=-1):
+        h, w = self.s.getmaxyx()
+        if not (0 <= y < h and 0 <= x < w) or not text:
+            return
+        attr = self.color(color, bg) | (curses.A_BOLD if bold else 0)
+        try:
+            self.s.addstr(y, x, clip(text, w - x) if width(text) > w - x else text, attr)
+        except curses.error:
+            pass
+
+    def fill(self, y, x, n, bg=SEL_BG):
+        self.put(y, x, " " * max(0, n), "white", bg=bg)
+
+    def say(self, text, seconds=3):
+        self.message, self.message_until = text, time.monotonic() + seconds
+
+    # ── data ───────────────────────────────────────────────────────────
+
+    def load(self):
+        """Re-reads the file if it changed or the day did, and drops what was
+        done before today."""
+        try:
+            mtime = os.path.getmtime(FILE)
+        except FileNotFoundError:
+            mtime = None
+        today = dt.date.today()
+        if mtime == self.mtime and today == self.today:
+            return
+        self.today, self.mtime = today, mtime
+        try:
+            items = read_items()
+        except (OSError, UnicodeDecodeError) as e:
+            self.say(f"couldn't read {FILE}: {e}", 5)
+            return
+        changed = False
+        for item in items:
+            if item.done and not item.done_on:  # ticked by hand: it goes tonight
+                item.done_on, changed = today, True
+        keep = [i for i in items if not (i.done and i.done_on < today)]
+        self.items = keep
+        if changed or len(keep) != len(items):
+            self.save()
+        self.sel = max(0, min(self.sel, len(self.items) - 1))
+
+    def save(self):
+        try:
+            write_items(self.items)
+            self.mtime = os.path.getmtime(FILE)
+        except OSError as e:
+            self.say(f"couldn't save: {e}", 5)
+
+    def shown(self):
+        return ordered(self.items)
+
+    def selected(self):
+        shown = self.shown()
+        return shown[self.sel] if 0 <= self.sel < len(shown) else None
+
+    def follow(self, item):
+        """Keeps the selection on item after the order changed."""
+        shown = self.shown()
+        self.sel = next((i for i, it in enumerate(shown) if it is item), 0)
+
+    def toggle_done(self, item):
+        item.done = not item.done
+        item.done_on = self.today if item.done else None
+        self.save()
+        self.follow(item)
+
+    def toggle_flag(self, item):
+        item.flag = not item.flag
+        self.save()
+        self.follow(item)
+
+    def save_form(self):
+        f = self.form
+        try:
+            text, due, flag = f.values(self.today)
+        except ValueError as e:
+            f.error = str(e)
+            return
+        item = f.item or Item(text)
+        item.text, item.due, item.flag = text, due, flag
+        if not f.item:
+            self.items.append(item)
+        self.form = None
+        self.save()
+        self.follow(item)
+        self.say(("updated: " if f.item else "added: ") + text)
+
+    def delete(self, item):
+        self.items.remove(item)
+        self.save()
+        self.sel = max(0, min(self.sel, len(self.items) - 1))
+        self.say(f"deleted: {item.text}")
+
+    # ── drawing ────────────────────────────────────────────────────────
+
+    def draw(self):
+        s = self.s
+        h, w = s.getmaxyx()
+        s.erase()
+        shown = self.shown()
+        left = sum(1 for i in shown if not i.done)
+        self.put(0, 1, "To do", "key", bold=True)
+        count = f"{left} left" if left else ""
+        self.put(0, w - width(count) - 1, count, "dim")
+        self.put(1, 1, "─" * (w - 2), "dim")
+
+        box_top = self.draw_keys(h, w)
+        status = box_top - 1
+        list_top, list_bottom = 2, status - 1  # inclusive
+        self.draw_list(list_top, list_bottom, w, shown)
+        self.draw_status(status, w)
+        if self.form:
+            self.draw_form(h, w)
+        s.refresh()
+
+    def draw_list(self, top, bottom, w, shown):
+        self.rows = {}
+        if not shown:
+            self.put(top + 1, 1, clip("Nothing to do · a adds one", w - 2), "dim")
+            return
+        n = bottom - top + 1
+        if n <= 0:
+            return
+        self.top = min(self.top, self.sel)
+        self.top = max(self.top, self.sel - n + 1, 0)
+        for row, idx in enumerate(range(self.top, min(len(shown), self.top + n))):
+            item, y = shown[idx], top + row
+            self.rows[y] = idx
+            sel = idx == self.sel and not self.form
+            bg = SEL_BG if sel else -1
+            if sel:
+                self.fill(y, 0, w)
+            if item.done:
+                self.put(y, 1, " ✓ ", "green", bg=bg)
+            else:
+                self.put(y, 1, "[ ]", "gray", bg=bg)
+            if item.flag and not item.done:
+                self.put(y, 5, "!", "yellow", bold=True, bg=bg)
+            due, due_color = ("", "dim")
+            if item.due and not item.done:
+                due, due_color = due_label(item.due, self.today)
+            text_w = w - 8 - (width(due) + 1 if due else 0)
+            self.put(y, 7, clip(item.text, text_w), "dim" if item.done else "white",
+                     bold=sel, bg=bg)
+            if due:
+                self.put(y, w - width(due) - 1, due, due_color, bold=due_color == "red", bg=bg)
+        if self.top > 0:
+            self.put(top, w - 2, "↑", "dim")
+        if self.top + n < len(shown):
+            self.put(bottom, w - 2, "↓", "dim")
+
+    def draw_keys(self, h, w):
+        """The key box at the bottom; returns its top row."""
+        cells = [(k, d) for k, d in KEYS]
+        cell_w = [width(k) + width(d) + 1 for k, d in cells]
+        for cols in range(len(cells), 0, -1):  # as many columns as fit
+            col_w = [max(cell_w[c::cols]) + 2 for c in range(cols)]
+            if sum(col_w) - 2 <= w - 4 or cols == 1:
+                break
+        col_x = [2 + sum(col_w[:c]) for c in range(cols)]
+        rows = -(-len(cells) // cols)
+        bh = rows + 2
+        if h - bh < 6:  # too short: keep the list readable instead
+            return h
+        top = h - bh
+        self.put(top, 0, "╭" + "─" * (w - 2) + "╮", "dim")
+        self.put(top, 2, " keys ", "gray")
+        for r in range(rows):
+            y = top + 1 + r
+            self.put(y, 0, "│", "dim")
+            self.put(y, w - 1, "│", "dim")
+            for c in range(cols):
+                i = r * cols + c
+                if i >= len(cells):
+                    break
+                k, d = cells[i]
+                x = col_x[c]
+                self.put(y, x, k, "key", bold=True)
+                self.put(y, x + width(k) + 1, d, "gray")
+        self.put(h - 1, 0, "╰" + "─" * (w - 2) + "╯", "dim")
+        return top
+
+    def draw_status(self, y, w):
+        if self.confirm:
+            self.put(y, 1, clip(f"delete '{self.confirm.text}'? y/n", w - 2), "red", bold=True)
+        elif self.message and time.monotonic() < self.message_until:
+            self.put(y, 1, clip(self.message, w - 2), "yellow")
+
+    def box(self, top, left, h, w, title):
+        self.put(top, left, "╭" + "─" * (w - 2) + "╮", "key")
+        for y in range(top + 1, top + h - 1):
+            self.put(y, left, "│", "key")
+            self.put(y, left + 1, " " * (w - 2), "white")
+            self.put(y, left + w - 1, "│", "key")
+        self.put(top + h - 1, left, "╰" + "─" * (w - 2) + "╯", "key")
+        self.put(top, left + 2, f" {title} ", "white", bold=True)
+
+    def draw_form(self, h, w):
+        f = self.form
+        bw = min(60, w - 2)
+        bh = len(FIELDS) + 6
+        top, left = max(0, (h - bh) // 2), max(0, (w - bw) // 2)
+        self.box(top, left, bh, bw, "Edit to-do" if f.item else "New to-do")
+        cur = f.current()
+        vx, vw = left + 8, bw - 10
+        for i, name in enumerate(FIELDS):
+            y = top + 2 + i
+            focused = name == cur
+            self.put(y, left + 2, f"{LABELS[name]:>4}", "key" if focused else "dim", bold=focused)
+            if name == "flag":
+                text = "[x] yes" if f.v["flag"] else "[ ] no"
+                hint = "  space toggles" if focused else ""
+                self.put(y, vx, clip(text + hint, vw), "white" if focused else "gray",
+                         bg=SEL_BG if focused else -1)
+                continue
+            value = f.v[name]
+            if focused:
+                self.fill(y, vx, vw)
+                shown = value[-(vw - 2):] if width(value) > vw - 2 else value
+                self.put(y, vx, shown + "▏", "white", bold=True, bg=SEL_BG)
+            else:
+                placeholder = "none" if name == "due" else ""
+                self.put(y, vx, clip(value, vw) if value else placeholder,
+                         "gray" if value else "dim")
+        if f.error:
+            self.put(top + bh - 3, left + 2, clip(f.error, bw - 4), "red", bold=True)
+        elif cur == "due":
+            try:
+                d = parse_due(f.v["due"], self.today)
+                note = f"→ {WEEKDAYS[d.weekday()]} {d.day} {MONTHS[d.month]} {d.year}" if d \
+                    else "empty = no due date"
+            except ValueError:
+                note = "tom, fri, 14, 25/11 or 2027-03-14"
+            self.put(top + bh - 3, left + 2, clip(note, bw - 4), "dim")
+        self.put(top + bh - 2, left + 2, clip("tab next · enter save · esc cancel", bw - 4), "dim")
+
+    # ── keys ───────────────────────────────────────────────────────────
+
+    def form_key(self, k):
+        f = self.form
+        name = f.current()
+        if k == "\x1b":
+            self.form = None
+        elif k in ("\n", "\r", curses.KEY_ENTER):
+            self.save_form()
+            return
+        elif k in ("\t", curses.KEY_DOWN):
+            f.focus = (f.focus + 1) % len(FIELDS)
+        elif k in (curses.KEY_BTAB, curses.KEY_UP):
+            f.focus = (f.focus - 1) % len(FIELDS)
+        elif name == "flag":
+            if k in (" ", "x", "y", "n", "f", curses.KEY_LEFT, curses.KEY_RIGHT):
+                f.v["flag"] = (not f.v["flag"]) if k not in ("y", "n") else k == "y"
+        elif k in ("\x7f", "\b", curses.KEY_BACKSPACE):
+            f.v[name] = f.v[name][:-1]
+        elif k == "\x15":  # Ctrl+U clears the field
+            f.v[name] = ""
+        elif isinstance(k, str) and k.isprintable():
+            f.v[name] += k
+        f.error = ""
+
+    def key(self, k):
+        if self.form:
+            self.form_key(k)
+            return
+        if self.confirm:
+            item, self.confirm = self.confirm, None
+            if k in ("y", "Y"):
+                self.delete(item)
+            return
+        if k == curses.KEY_MOUSE:
+            self.mouse()
+            return
+        n = len(self.shown())
+        item = self.selected()
+        if k in ("j", curses.KEY_DOWN):
+            self.sel = min(self.sel + 1, n - 1)
+        elif k in ("k", curses.KEY_UP):
+            self.sel = max(self.sel - 1, 0)
+        elif k in ("g", curses.KEY_HOME):
+            self.sel = 0
+        elif k in ("G", curses.KEY_END):
+            self.sel = max(n - 1, 0)
+        elif k == "a":
+            self.form = Form()
+        elif k == "r":
+            self.mtime = -1
+        elif not item:
+            if k in ("e", "\n", "\r", curses.KEY_ENTER, " ", "f", "x", curses.KEY_DC):
+                self.say("nothing here yet · a adds one")
+        elif k in ("e", "\n", "\r", curses.KEY_ENTER):
+            self.form = Form(item)
+        elif k == " ":
+            self.toggle_done(item)
+        elif k == "f":
+            self.toggle_flag(item)
+        elif k in ("x", curses.KEY_DC):
+            self.confirm = item
+
+    def mouse(self):
+        try:
+            _, x, y, _, bstate = curses.getmouse()
+        except curses.error:
+            return
+        n = len(self.shown())
+        if bstate & getattr(curses, "BUTTON4_PRESSED", 0):
+            self.sel = max(self.sel - 1, 0)
+            return
+        if bstate & getattr(curses, "BUTTON5_PRESSED", 0x200000):
+            self.sel = min(self.sel + 1, n - 1)
+            return
+        if not bstate & (curses.BUTTON1_PRESSED | curses.BUTTON1_CLICKED):
+            return
+        if y in self.rows:
+            self.sel = self.rows[y]
+            if x <= 4:
+                self.toggle_done(self.selected())
+
+
+def read_key(stdscr):
+    """Next key: a str for characters (UTF-8 decoded), an int for curses keys.
+    Raises curses.error when nothing was pressed (this curses has no get_wch)."""
+    ch = stdscr.getch()
+    if ch == -1:
+        raise curses.error("no input")
+    if ch >= 256:
+        return ch
+    if ch < 0x80:
+        return chr(ch)
+    need = 1 if ch >> 5 == 0b110 else 2 if ch >> 4 == 0b1110 else 3 if ch >> 3 == 0b11110 else 0
+    raw = bytes([ch])
+    for _ in range(need):
+        nxt = stdscr.getch()
+        if not 0x80 <= nxt < 0xC0:
+            break
+        raw += bytes([nxt])
+    return raw.decode("utf-8", "replace")
+
+
+def main(stdscr):
+    app = App(stdscr)
+    while True:
+        app.load()
+        app.draw()
+        try:
+            k = read_key(stdscr)
+        except curses.error:
+            continue
+        except KeyboardInterrupt:
+            return
+        if k == curses.KEY_RESIZE:
+            continue
+        app.key(k)
+
+
+if __name__ == "__main__":
+    locale.setlocale(locale.LC_ALL, "")
+    os.environ.setdefault("ESCDELAY", "25")
+    try:
+        curses.wrapper(main)
+    except KeyboardInterrupt:
+        pass

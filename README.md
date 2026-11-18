@@ -26,16 +26,19 @@ My keyboard-driven terminal setup for macOS. Opening Ghostty gives this workspac
 │ Mon Tue Wed Thu Fri Sat Sun  │ 09:00–10 │
 │  16  17 [18]  19  20  21  22 │ Standup  │
 │                              │ 16:30–17 │
-│ ─ Wed 18 November ─────────  │ Codam    │
-│ █ 09:00–10:00 Standup        │          │
-│ █ 16:30–17:00 Codam          │ next in  │
+│ ─ Wed 18 November ─────────  ├──────────┤
+│ █ 09:00–10:00 Standup        │ To do    │
+│ █ 16:30–17:00 Codam          │ [ ] ! Pay│
+│                              │ [ ]   Buy│
+│                              │ ╭ keys ─╮│
 └──────────────────────────────┴──────────┘
 ```
 
 - **calendar** (`bin/calendar`): a day / week / month / year calendar. Move with the arrow keys, press `a` to add an event on the selected day (timed, all-day, or with just a start time), `e` to edit one, `x` to delete it. See [Calendar tab](#calendar-tab).
 - **today** (`bin/calendar-today`): today's events with their times, all-day ones first. The one happening now is green, past ones are dimmed, and the bottom says how long until the next one. On a free day it says "Nothing today".
+- **to do** (`bin/todo`): a to-do list under today's events. Press `a` to add one (with an optional due date and flag), `Space` to tick it off, `x` to delete it; its keys are always shown at the bottom of the pane. Done to-dos are cleared at midnight. See [To-do list](#to-do-list).
 
-Both read and write the Mac's own Calendar, which syncs with iCloud, so the iPhone sees what you add here and the other way round.
+The calendar and today panes read and write the Mac's own Calendar, which syncs with iCloud, so the iPhone sees what you add here and the other way round.
 
 Two more kinds of tab open on a project picker (`~` and the folders in `~/Projects`). Each tab is named after its project, like `claude:dotfiles` or `developer:libasm`:
 
@@ -96,8 +99,9 @@ git clone git@github.com:martinnsanzz/dotfiles.git ~/Projects/Claude/dotfiles
 5. `bin/sysinfo` and `bin/procs` fill the top-left of home. Both are Python curses like `home-art`. sysinfo reads CPU ticks straight from the kernel, procs reads `ps` and `lsappinfo` every 2 seconds. `btop/btop.conf` is kept for running btop by hand.
 6. yazi's `open-nvim` plugin (`yazi/plugins/`, bound in `yazi/keymap.toml` and `yazi/init.lua`) opens files with `bin/yazi-nvim`, which swaps nvim into the tree's pane right away; quitting nvim brings the tree back. (yazi's built-in way of running an editor in its pane takes about 5 seconds to start.)
 7. `bin/calendar` and `bin/calendar-today` (Python curses) get events from `calhelper`, a small Swift program using EventKit that prints JSON (`calhelper list 2026-11-01 2026-11-30`, `add`, `update`, `delete`). They re-read every 30 seconds, and the today pane also reloads the moment the calendar changes something (it watches `~/.cache/dotfiles-calendar.stamp`).
-8. `bin/flash` shows a short message in a centered tmux popup. `Ctrl+b r` uses it to confirm the tmux config reloaded. Ghostty's `Cmd+Shift+R` reloads Ghostty and then types a private key code that tmux binds (`User0`) to the same popup.
-9. `install.sh` symlinks each file in this repo to the place the app reads it from. Editing a file here changes the live config.
+8. `bin/todo` (Python curses) keeps the to-do list in `~/.local/share/todo.txt`. It checks the file every second, so edits made by hand show up right away, and on the first check after midnight it deletes the to-dos done before today.
+9. `bin/flash` shows a short message in a centered tmux popup. `Ctrl+b r` uses it to confirm the tmux config reloaded. Ghostty's `Cmd+Shift+R` reloads Ghostty and then types a private key code that tmux binds (`User0`) to the same popup.
+10. `install.sh` symlinks each file in this repo to the place the app reads it from. Editing a file here changes the live config.
 
 | Repo file | Linked to |
 |---|---|
@@ -127,7 +131,7 @@ sysinfo has no keys besides `q` (quit to the shell).
 
 ## Calendar tab
 
-Tab 2 (`Option+2`) is a calendar for the Mac's Calendar app. It can't be closed; quitting either pane (`q`) just restarts it.
+Tab 2 (`Option+2`) is a calendar for the Mac's Calendar app, with today's events on the right and a [to-do list](#to-do-list) under them. It can't be closed; quitting the calendar or today pane (`q`) just restarts it.
 
 | Keys | Action |
 |---|---|
@@ -166,6 +170,36 @@ The calendar doesn't talk to the iPhone itself: it reads and writes the Mac's Ca
 1. **iCloud Calendar on for this Mac:** System Settings → your name → iCloud → Calendar (and on the iPhone: Settings → your name → iCloud → Calendar). The calendars should appear in the Mac's Calendar app.
 2. **Default calendar is an iCloud one:** Calendar app → Settings → General → Default calendar, so events added here land in iCloud and not "On My Mac".
 3. **Allow access once:** the first time, macOS asks whether Ghostty may access your calendars. If you said no, turn it on in System Settings → Privacy & Security → Calendars → Ghostty, then press `r`.
+
+### To-do list
+
+The bottom-right pane of the calendar tab (`Option+→` then `Option+↓`, or click it) is a to-do list. Its keys are always shown in the box at the bottom of the pane.
+
+| Keys | Action |
+|---|---|
+| `j`/`k` or `↓`/`↑` | Move |
+| `g` / `G` | First / last to-do |
+| `a` | Add a to-do |
+| `e` / `Enter` | Edit it |
+| `Space` | Done / not done |
+| `f` | Flag / unflag |
+| `x` / `Delete` | Delete it (asks `y`/`n`) |
+| `r` | Re-read the file |
+| Mouse | Click a row to select it, click its `[ ]` to tick it, scroll to move |
+
+**Adding or editing** opens a small form: Text, Due and Flag. `Tab`/`↓` next field, `↑` back, `Space` toggles the flag, `Enter` saves, `Esc` cancels, `Ctrl+u` clears a field. Due is optional and takes `today`, `tom`, a weekday (`fri`, the next one), a day of the month (`14`, this month or the next), `25/11`, or `2027-03-14`; the form shows the date it understood.
+
+Flagged to-dos (`!`) come first, then by due date (overdue ones in red, today's in yellow), then the rest in the order you added them. Done ones (`✓`) sink to the bottom and are deleted at midnight.
+
+The list is the plain text file `~/.local/share/todo.txt`, one to-do per line, so you can also edit it by hand; the pane picks up changes within a second:
+
+```
+[ ] Pay rent  due:2026-11-20  !
+[ ] Buy milk
+[x] Email Ana  done:2026-11-18
+```
+
+It stays on this Mac: unlike calendar events, to-dos don't sync to the iPhone.
 
 ## ASCII art
 
