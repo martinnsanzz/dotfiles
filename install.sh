@@ -58,20 +58,59 @@ link_nvim() {
 	echo "linked  $dest"
 }
 
-# The calendar tab's bridge to the Mac's Calendar (and so iCloud / iPhone).
-# Compiled from calendar/calhelper.swift with the Xcode command line tools.
-build_calhelper() {
-	local src="$DOTFILES/calendar/calhelper.swift" out="$HOME/.local/bin/calhelper"
+# build_swift <source in repo> <command name>: compiles a small Swift program
+# into ~/.local/bin with the Xcode command line tools. Skipped when the build
+# is newer than the source. Prints "built" when it (re)compiled.
+build_swift() {
+	local src="$DOTFILES/$1" out="$HOME/.local/bin/$2"
 	if ! command -v swiftc >/dev/null 2>&1; then
-		echo "skip    calhelper (no swiftc: run xcode-select --install)"
-		return
+		echo "skip    $2 (no swiftc: run xcode-select --install)"
+		return 1
 	fi
 	if [ -x "$out" ] && [ ! -L "$out" ] && [ "$out" -nt "$src" ]; then
 		echo "ok      $out"
-		return
+		return 0
 	fi
 	mkdir -p "$(dirname "$out")"
 	swiftc -O "$src" -o "$out" && echo "built   $out"
+}
+
+# raise-windows brings windows opened from a terminal to the front. A
+# LaunchAgent starts it at login and restarts it if it ever stops; it's
+# reloaded here whenever the program or its plist changed.
+RAISE_LABEL=com.dotfiles.raise-windows
+start_raise_windows() {
+	local built plist="$HOME/Library/LaunchAgents/$RAISE_LABEL.plist"
+	built=$(build_swift raise-windows/raise-windows.swift raise-windows) || return 0
+	echo "$built"
+	local want
+	want=$(cat <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key><string>$RAISE_LABEL</string>
+	<key>ProgramArguments</key><array><string>$HOME/.local/bin/raise-windows</string></array>
+	<key>RunAtLoad</key><true/>
+	<key>KeepAlive</key><true/>
+	<key>ProcessType</key><string>Interactive</string>
+</dict>
+</plist>
+PLIST
+)
+	local changed=0
+	if [ "$(cat "$plist" 2>/dev/null)" != "$want" ]; then
+		mkdir -p "$(dirname "$plist")"
+		printf '%s\n' "$want" > "$plist"
+		changed=1
+	fi
+	case "$built" in built*) changed=1 ;; esac
+	if [ "$changed" = 1 ] || ! launchctl print "gui/$(id -u)/$RAISE_LABEL" >/dev/null 2>&1; then
+		launchctl bootout "gui/$(id -u)/$RAISE_LABEL" 2>/dev/null || true
+		launchctl bootstrap "gui/$(id -u)" "$plist" && echo "started $RAISE_LABEL"
+	else
+		echo "ok      $plist (running)"
+	fi
 }
 
 link_configs() {
@@ -89,7 +128,8 @@ link_configs() {
 		chmod +x "$script"
 		link "bin/$(basename "$script")" "$HOME/.local/bin/$(basename "$script")"
 	done
-	build_calhelper
+	build_swift calendar/calhelper.swift calhelper || true
+	start_raise_windows
 }
 
 case "${1:-all}" in

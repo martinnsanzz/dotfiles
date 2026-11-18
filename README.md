@@ -73,7 +73,7 @@ git clone git@github.com:martinnsanzz/dotfiles.git ~/Projects/Claude/dotfiles
 ~/Projects/Claude/dotfiles/install.sh
 ```
 
-`install.sh` also clones [nvim-config](https://github.com/martinnsanzz/nvim-config) next to this repo (`~/Projects/Claude/nvim-config`) if it isn't there yet. Then open Ghostty (`open -a Ghostty`). `./install.sh links` only re-creates the symlinks and `./install.sh tools` only installs the tools. Any config that already exists is moved to `<name>.bak-<timestamp>` before it gets replaced.
+`install.sh` also clones [nvim-config](https://github.com/martinnsanzz/nvim-config) next to this repo (`~/Projects/Claude/nvim-config`) if it isn't there yet. Then open Ghostty (`open -a Ghostty`). `./install.sh links` only re-creates the symlinks, compiles `calhelper` and `raise-windows` (when their source changed) and makes sure `raise-windows` is running; `./install.sh tools` only installs the tools. Any config that already exists is moved to `<name>.bak-<timestamp>` before it gets replaced.
 
 ## The tools
 
@@ -86,6 +86,7 @@ git clone git@github.com:martinnsanzz/dotfiles.git ~/Projects/Claude/dotfiles
 | [Claude Code](https://claude.com/claude-code) | AI coding assistant. | The left pane of each claude tab. |
 | [btop](https://github.com/aristocratos/btop) | A live system monitor. | Not on the home tab any more; run `btop` for the full view (plain gray/blue theme). |
 | [fzf](https://github.com/junegunn/fzf) | A fuzzy finder. | The project picker behind `Option+c` and `Option+d`. |
+| `raise-windows` | A small Swift program running in the background. | Brings windows opened from a terminal (pygame, tkinter, `make run`, F5 in nvim) in front of Ghostty. See [Windows from the terminal](#windows-from-the-terminal). |
 | EventKit (`calhelper`) | Apple's calendar framework. | `calendar/calhelper.swift`, compiled by `install.sh`, is the calendar tab's link to the Mac's Calendar and through it iCloud and the iPhone. |
 | fish | The shell. | Every terminal pane. |
 | Homebrew | The macOS package manager. | `install.sh` uses it to install everything. |
@@ -101,7 +102,8 @@ git clone git@github.com:martinnsanzz/dotfiles.git ~/Projects/Claude/dotfiles
 7. `bin/calendar` and `bin/calendar-today` (Python curses) get events from `calhelper`, a small Swift program using EventKit that prints JSON (`calhelper list 2026-11-01 2026-11-30`, `add`, `update`, `delete`). They re-read every 30 seconds, and the today pane also reloads the moment the calendar changes something (it watches `~/.cache/dotfiles-calendar.stamp`).
 8. `bin/todo` (Python curses) keeps the to-do list in `~/.local/share/todo.txt`. It checks the file every second, so edits made by hand show up right away, and on the first check after midnight it deletes the to-dos done before today.
 9. `bin/flash` shows a short message in a centered tmux popup. `Ctrl+b r` uses it to confirm the tmux config reloaded. Ghostty's `Cmd+Shift+R` reloads Ghostty and then types a private key code that tmux binds (`User0`) to the same popup.
-10. `install.sh` symlinks each file in this repo to the place the app reads it from. Editing a file here changes the live config.
+10. `raise-windows/raise-windows.swift` is compiled by `install.sh` to `~/.local/bin/raise-windows`, and a LaunchAgent (`~/Library/LaunchAgents/com.dotfiles.raise-windows.plist`, written by `install.sh`) starts it at login and restarts it if it stops.
+11. `install.sh` symlinks each file in this repo to the place the app reads it from. Editing a file here changes the live config.
 
 | Repo file | Linked to |
 |---|---|
@@ -112,6 +114,7 @@ git clone git@github.com:martinnsanzz/dotfiles.git ~/Projects/Claude/dotfiles
 | [nvim-config](https://github.com/martinnsanzz/nvim-config) (separate repo, cloned next to this one) | `~/.config/nvim` |
 | `bin/*` | `~/.local/bin/` |
 | `calendar/calhelper.swift` (compiled, not linked) | `~/.local/bin/calhelper` |
+| `raise-windows/raise-windows.swift` (compiled, not linked) | `~/.local/bin/raise-windows`, started by `~/Library/LaunchAgents/com.dotfiles.raise-windows.plist` |
 
 ## Home tab panes
 
@@ -200,6 +203,35 @@ The list is the plain text file `~/.local/share/todo.txt`, one to-do per line, s
 ```
 
 It stays on this Mac: unlike calendar events, to-dos don't sync to the iPhone.
+
+## Windows from the terminal
+
+On its own, macOS opens a window from a program you start in the terminal (a pygame game with `make run`, `python3 file.py`, F5 in nvim) *behind* Ghostty. Only the app you're using is allowed to hand focus to another app, and Ghostty never does, so the new window's request to come forward is refused.
+
+`raise-windows` fixes that the way VS Code feels: the window opens in front, with focus, so you can play or type straight away. It runs in the background and:
+
+1. gets a notice from macOS each time an app starts (a Python program becomes an app, "Python" in the Dock, when it opens its first window);
+2. checks whether that app was started from a terminal, meaning one of its parent processes is tmux, nvim, make, a shell or Ghostty;
+3. if so, waits for its window (up to 30 seconds) and brings it to the front with all its windows.
+
+Apps you open from the Dock, Spotlight or Finder are started by macOS itself, not a terminal, so they're left alone. It works the same from a Ghostty tab, a tmux pane or nvim, because all three show up as parents. It needs no permissions and nothing extra installed: `install.sh` compiles it with the Xcode command line tools, like `calhelper`.
+
+**Try it:** run this from a Ghostty tab, a tmux pane, or open it in nvim and press F5:
+
+```sh
+python3 ~/Projects/Claude/dotfiles/raise-windows/test-window.py
+```
+
+The window should open in front of Ghostty, say "has focus" in green, and show the keys you type without clicking it. `Esc` closes it.
+
+To see what it's doing, stop the background copy and run one in the foreground; it prints each app it raises or ignores:
+
+```sh
+launchctl bootout gui/$(id -u)/com.dotfiles.raise-windows
+raise-windows -v
+```
+
+`Ctrl+C` stops it; `./install.sh links` starts the background copy again.
 
 ## ASCII art
 
@@ -294,6 +326,7 @@ tmux catches these Option shortcuts before the program in the pane sees them. Fo
 ## Troubleshooting
 
 - **Start the layout fresh:** run `tmux kill-server`, then open a new Ghostty window.
+- **A window from the terminal still opens behind Ghostty:** check the background program runs with `launchctl print gui/$(id -u)/com.dotfiles.raise-windows | grep state` (it should say `running`); if not, run `./install.sh links`. Then run `raise-windows -v` as shown in [Windows from the terminal](#windows-from-the-terminal) to see whether it notices the app.
 - **Calendar says no access or shows no events:** see [iPhone sync](#iphone-sync). Run `calhelper calendars` in a Ghostty pane to list the calendars it can see.
 - **A pane's program exited:** the pane falls back to a shell. Type `claude`, `yazi`, `sysinfo`, `procs` or `home-art` to start it again. In a developer tab, quitting nvim leaves a shell in the project; type `nvim .` to reopen it.
 - **Ghostty opens a plain shell:** tmux isn't installed or isn't on PATH. Run `./install.sh tools`.
