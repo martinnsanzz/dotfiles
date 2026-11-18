@@ -76,7 +76,8 @@ Then open Ghostty (`open -a Ghostty`). `./install.sh links` only re-creates the 
 5. `bin/home-art` plays looping ASCII animations across the bottom of the home tab, with the main shortcuts boxed in its top-right corner. It's Python (curses, standard library only), using the `python3` that comes with the Xcode command line tools.
 6. `bin/sysinfo` and `bin/procs` fill the top-left of home. Both are Python curses like `home-art`. sysinfo reads CPU ticks straight from the kernel, procs reads `ps` and `lsappinfo` every 2 seconds. `btop/btop.conf` is kept for running btop by hand.
 7. yazi's `open-vim` plugin (`yazi/plugins/`, bound in `yazi/keymap.toml` and `yazi/init.lua`) opens files with `bin/yazi-vim`. In a claude tab it swaps nvim into the tree's pane right away, and quitting nvim brings the tree back. In a developer tab it sends the file to the nvim pane on the right. (yazi's built-in way of running an editor in its pane takes about 5 seconds to start.)
-8. `install.sh` symlinks each file in this repo to the place the app reads it from. Editing a file here changes the live config.
+8. `bin/flash` shows a short message in a centered tmux popup. `Ctrl+b r` uses it to confirm the tmux config reloaded. Ghostty's `Cmd+Shift+R` reloads Ghostty and then types a private key code that tmux binds (`User0`) to the same popup.
+9. `install.sh` symlinks each file in this repo to the place the app reads it from. Editing a file here changes the live config.
 
 | Repo file | Linked to |
 |---|---|
@@ -187,9 +188,9 @@ Run `vimtutor` in the terminal for a 30-minute interactive lesson.
 |---|---|
 | `Option+/` | tmux / Ghostty shortcuts |
 | `Option+n` | nvim shortcuts |
-| `Ctrl+b r` | Reload tmux config |
+| `Ctrl+b r` | Reload tmux config (a popup confirms it) |
 | `Ctrl+b d` | Detach (session keeps running) |
-| `Cmd+Shift+R` | Reload Ghostty config |
+| `Cmd+Shift+R` | Reload Ghostty config (a popup confirms it) |
 
 tmux catches these Option shortcuts before the program in the pane sees them. For example, `Option+arrows` no longer jump by word in fish, and Claude Code's own Option shortcuts that overlap won't fire. Every other Option combination still passes through.
 

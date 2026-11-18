@@ -22,4 +22,7 @@ keybind = alt+arrow_right=unbind
 # Closing a window only detaches tmux, so no need to confirm
 confirm-close-surface = false
 
+# Reload, then send tmux a private key code so it pops up a confirmation
+# (User0 in tmux.conf)
 keybind = cmd+shift+r=reload_config
+keybind = chain=text:\x1b[9001~
