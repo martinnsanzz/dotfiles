@@ -1,6 +1,6 @@
 # dotfiles
 
-My keyboard-driven terminal setup for macOS. Opening Ghostty gives this workspace automatically, in a slightly see-through window with numbered tabs in the top bar. It starts with just the home tab, which can't be closed:
+My keyboard-driven terminal setup for macOS. Opening Ghostty gives this workspace automatically, in a slightly see-through window with numbered tabs in the top bar. It starts with two tabs that can't be closed, home and calendar:
 
 ```
  1 home
@@ -19,10 +19,28 @@ My keyboard-driven terminal setup for macOS. Opening Ghostty gives this workspac
 
 `Option+arrows` move between panes and `Option+?` shows every shortcut.
 
+```
+ 2 calendar
+┌──────────────────────────────┬──────────┐
+│ ‹ November 2026 ›   d w m y  │ Today    │
+│ Mon Tue Wed Thu Fri Sat Sun  │ 09:00–10 │
+│  16  17 [18]  19  20  21  22 │ Standup  │
+│                              │ 16:30–17 │
+│ ─ Wed 18 November ─────────  │ Codam    │
+│ █ 09:00–10:00 Standup        │          │
+│ █ 16:30–17:00 Codam          │ next in  │
+└──────────────────────────────┴──────────┘
+```
+
+- **calendar** (`bin/calendar`): a day / week / month / year calendar. Move with the arrow keys, press `a` to add an event on the selected day, `e` to edit one, `x` to delete it. See [Calendar tab](#calendar-tab).
+- **today** (`bin/calendar-today`): today's events with their times, all-day ones first. The one happening now is green, past ones are dimmed, and the bottom says how long until the next one. On a free day it says "Nothing today".
+
+Both read and write the Mac's own Calendar, which syncs with iCloud, so the iPhone sees what you add here and the other way round.
+
 Two more kinds of tab open on a project picker (`~` and the folders in `~/Projects`). Each tab is named after its project, like `claude:dotfiles` or `developer:libasm`:
 
 ```
- 2 claude:dotfiles
+ 3 claude:dotfiles
 ┌──────────────┬──────────────┐
 │              │  yazi tree   │
 │   claude     │ (Enter→nvim) │
@@ -35,7 +53,7 @@ Two more kinds of tab open on a project picker (`~` and the folders in `~/Projec
 - `Option+d` opens a **developer** tab, for working on Codam projects: just nvim, full screen, opened on that project (`nvim .`). The nvim config brings its own file tree and terminal, so the tab needs nothing else.
 
 ```
- 3 developer:libasm
+ 4 developer:libasm
 ┌──────────────────────────────┐
 │                              │
 │      nvim . (the project)    │
@@ -65,19 +83,21 @@ git clone git@github.com:martinnsanzz/dotfiles.git ~/Projects/Claude/dotfiles
 | [Claude Code](https://claude.com/claude-code) | AI coding assistant. | The left pane of each claude tab. |
 | [btop](https://github.com/aristocratos/btop) | A live system monitor. | Not on the home tab any more; run `btop` for the full view (plain gray/blue theme). |
 | [fzf](https://github.com/junegunn/fzf) | A fuzzy finder. | The project picker behind `Option+c` and `Option+d`. |
+| EventKit (`calhelper`) | Apple's calendar framework. | `calendar/calhelper.swift`, compiled by `install.sh`, is the calendar tab's link to the Mac's Calendar and through it iCloud and the iPhone. |
 | fish | The shell. | Every terminal pane. |
 | Homebrew | The macOS package manager. | `install.sh` uses it to install everything. |
 
 ### How it fits together
 
 1. `ghostty/config` sets `command = .../workspace`, so every Ghostty window runs that script instead of a plain shell. `macos-option-as-alt` makes the Option key work for tmux shortcuts, and `background-opacity` makes the window see-through.
-2. `bin/workspace` creates the tmux session `main` with only the home tab. If `main` already exists, it reattaches instead. That's why closing Ghostty loses nothing. It marks home with the tmux option `@locked`: `Option+x`/`Option+w` in `tmux.conf` refuse to close a locked tab (or its last pane), and a pane whose shell exits there gets a fresh shell instead of closing.
+2. `bin/workspace` creates the tmux session `main` with the home and calendar tabs. If `main` already exists, it reattaches instead. That's why closing Ghostty loses nothing. It marks both with the tmux option `@locked`: `Option+x`/`Option+w` in `tmux.conf` refuse to close a locked tab (or its last pane), and a pane whose program exits there is restarted instead of closing.
 3. `bin/dev claude [folder]` builds a claude/tree/terminal tab, and `bin/dev developer [folder]` opens a tab running `nvim .` in the folder. With `--pick` it first shows an fzf list of `~` and the folders in `~/Projects`.
 4. `bin/home-art` plays looping ASCII animations across the bottom of the home tab, with the main shortcuts boxed in its top-right corner. It's Python (curses, standard library only), using the `python3` that comes with the Xcode command line tools.
 5. `bin/sysinfo` and `bin/procs` fill the top-left of home. Both are Python curses like `home-art`. sysinfo reads CPU ticks straight from the kernel, procs reads `ps` and `lsappinfo` every 2 seconds. `btop/btop.conf` is kept for running btop by hand.
 6. yazi's `open-nvim` plugin (`yazi/plugins/`, bound in `yazi/keymap.toml` and `yazi/init.lua`) opens files with `bin/yazi-nvim`, which swaps nvim into the tree's pane right away; quitting nvim brings the tree back. (yazi's built-in way of running an editor in its pane takes about 5 seconds to start.)
-7. `bin/flash` shows a short message in a centered tmux popup. `Ctrl+b r` uses it to confirm the tmux config reloaded. Ghostty's `Cmd+Shift+R` reloads Ghostty and then types a private key code that tmux binds (`User0`) to the same popup.
-8. `install.sh` symlinks each file in this repo to the place the app reads it from. Editing a file here changes the live config.
+7. `bin/calendar` and `bin/calendar-today` (Python curses) get events from `calhelper`, a small Swift program using EventKit that prints JSON (`calhelper list 2026-11-01 2026-11-30`, `add`, `update`, `delete`). They re-read every 30 seconds, and the today pane also reloads the moment the calendar changes something (it watches `~/.cache/dotfiles-calendar.stamp`).
+8. `bin/flash` shows a short message in a centered tmux popup. `Ctrl+b r` uses it to confirm the tmux config reloaded. Ghostty's `Cmd+Shift+R` reloads Ghostty and then types a private key code that tmux binds (`User0`) to the same popup.
+9. `install.sh` symlinks each file in this repo to the place the app reads it from. Editing a file here changes the live config.
 
 | Repo file | Linked to |
 |---|---|
@@ -87,6 +107,7 @@ git clone git@github.com:martinnsanzz/dotfiles.git ~/Projects/Claude/dotfiles
 | `btop/btop.conf`, `btop/themes/plain.theme` | `~/.config/btop/` |
 | [nvim-config](https://github.com/martinnsanzz/nvim-config) (separate repo, cloned next to this one) | `~/.config/nvim` |
 | `bin/*` | `~/.local/bin/` |
+| `calendar/calhelper.swift` (compiled, not linked) | `~/.local/bin/calhelper` |
 
 ## Home tab panes
 
@@ -103,6 +124,36 @@ git clone git@github.com:martinnsanzz/dotfiles.git ~/Projects/Claude/dotfiles
 | `a` | Services: just yours ⇄ every user's (others' need sudo) |
 
 sysinfo has no keys besides `q` (quit to the shell).
+
+## Calendar tab
+
+Tab 2 (`Option+2`) is a calendar for the Mac's Calendar app. It can't be closed; quitting either pane (`q`) just restarts it.
+
+| Keys | Action |
+|---|---|
+| `←↓↑→` / `h j k l` | Move the selected day (a day left/right, a week up/down) |
+| `n` / `p` (or `]` / `[`) | Next / previous month (week, day or year in those views) |
+| `N` / `P` | Next / previous year |
+| `m` `w` `d` `y` | Month, week, day, year view |
+| `t` | Back to today |
+| `g` | Go to a date: `2027-03-14`, `2027-03`, or just a day of this month |
+| `a` / `Enter` | Add an event on the selected day |
+| `Tab` then `j`/`k` | Choose one of the day's events (`Esc` back to the days) |
+| `e` / `Enter` | Edit the chosen event |
+| `x` / `Delete` | Delete it (asks `y`/`n`) |
+| `r` | Re-read the calendar now |
+| `?` | Every key |
+| Mouse | Click a day to select it, double-click to add, scroll to page; click the view names at the top |
+
+**Adding or editing** opens a small form: Title, All day, Date, then Starts/Ends (timed) or Until (all-day, for events over several days), and Where. `Tab`/`↓` next field, `↑` back, `Space` toggles all day, `Enter` saves, `Esc` cancels, `Ctrl+u` clears a field. Times can be typed as `9`, `930`, `9:30` or `14.30`; an end time before the start means the next day. New events go to your default calendar. Read-only calendars (Birthdays, subscribed holidays) are shown but can't be edited. For a repeating event only that one occurrence changes.
+
+### iPhone sync
+
+The calendar doesn't talk to the iPhone itself: it reads and writes the Mac's Calendar database, and macOS syncs that with iCloud. So events made on the iPhone show up here (within the 30-second refresh once iCloud has synced, usually seconds), and events made here show up on the iPhone. For that:
+
+1. **iCloud Calendar on for this Mac:** System Settings → your name → iCloud → Calendar (and on the iPhone: Settings → your name → iCloud → Calendar). The calendars should appear in the Mac's Calendar app.
+2. **Default calendar is an iCloud one:** Calendar app → Settings → General → Default calendar, so events added here land in iCloud and not "On My Mac".
+3. **Allow access once:** the first time, macOS asks whether Ghostty may access your calendars. If you said no, turn it on in System Settings → Privacy & Security → Calendars → Ghostty, then press `r`.
 
 ## ASCII art
 
@@ -136,7 +187,7 @@ The same list opens with `Option+?` (in `tmux/keys.txt`). Option is the ⌥ key.
 | `Option+d` | New developer tab (pick a project) |
 | `Option+t` | New shell tab |
 | `Option+r` | Rename tab |
-| `Option+x` / `Option+Shift+w` | Close tab (not home) |
+| `Option+x` / `Option+Shift+w` | Close tab (not home or calendar) |
 
 ### Panes
 
@@ -197,6 +248,7 @@ tmux catches these Option shortcuts before the program in the pane sees them. Fo
 ## Troubleshooting
 
 - **Start the layout fresh:** run `tmux kill-server`, then open a new Ghostty window.
+- **Calendar says no access or shows no events:** see [iPhone sync](#iphone-sync). Run `calhelper calendars` in a Ghostty pane to list the calendars it can see.
 - **A pane's program exited:** the pane falls back to a shell. Type `claude`, `yazi`, `sysinfo`, `procs` or `home-art` to start it again. In a developer tab, quitting nvim leaves a shell in the project; type `nvim .` to reopen it.
 - **Ghostty opens a plain shell:** tmux isn't installed or isn't on PATH. Run `./install.sh tools`.
 - **nvim says a language server failed to install:** run `:Mason` to see why. If npm complains about root-owned files in `~/.npm`, run `sudo chown -R $(id -u):$(id -g) ~/.npm` once.

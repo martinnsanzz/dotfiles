@@ -1,0 +1,1015 @@
+#!/usr/bin/env python3
+"""The calendar tab: day / week / month / year views of the Mac's calendar.
+
+  ←↓↑→ / hjkl   move the selected day       n / p   next / previous page
+  m w d y       month, week, day, year view  N / P   next / previous year
+  t             today                        g       go to a date
+  a / Enter     add an event on the day      tab     choose one of the day's events
+  e             edit the event               x       delete it (asks y/n)
+  r             refresh now                  ?       every key
+  mouse         click a day to select it, double-click to add, wheel to page
+
+Events come from ~/.local/bin/calhelper (calendar/calhelper.swift), which
+reads and writes the Mac's Calendar database. The Mac syncs that with iCloud,
+so the iPhone sees what's added here and the other way round. Refreshes every
+30 seconds.
+"""
+
+import calendar as cal_mod
+import curses
+import datetime as dt
+import json
+import locale
+import os
+import subprocess
+import time
+import unicodedata
+
+HELPER = os.path.expanduser("~/.local/bin/calhelper")
+STAMP = os.path.expanduser("~/.cache/dotfiles-calendar.stamp")  # tells calendar-today to reload
+REFRESH_SECONDS = 30
+DOUBLE_CLICK = 0.4
+VIEWS = ("day", "week", "month", "year")
+
+PALETTE = {
+    "dim": (240, curses.COLOR_WHITE),
+    "gray": (245, curses.COLOR_WHITE),
+    "white": (255, curses.COLOR_WHITE),
+    "key": (75, curses.COLOR_BLUE),
+    "yellow": (221, curses.COLOR_YELLOW),
+    "red": (203, curses.COLOR_RED),
+    "green": (71, curses.COLOR_GREEN),
+}
+SEL_BG = 237  # background of the selected day / event
+
+WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+MONTHS = ("", "January", "February", "March", "April", "May", "June", "July",
+          "August", "September", "October", "November", "December")
+
+
+# ── calendar data ──────────────────────────────────────────────────────
+
+def helper(*args, timeout=20):
+    """Runs calhelper; returns (data, error)."""
+    try:
+        p = subprocess.run([HELPER, *args], capture_output=True, text=True, timeout=timeout)
+    except FileNotFoundError:
+        return None, "calhelper isn't built yet: run ./install.sh links"
+    except subprocess.TimeoutExpired:
+        return None, "the calendar didn't answer (is the access prompt open?)"
+    try:
+        data = json.loads(p.stdout or "null")
+    except ValueError:
+        return None, p.stderr.strip() or "calhelper failed"
+    if isinstance(data, dict) and "error" in data:
+        return None, data["error"]
+    return data, None
+
+
+def touch_stamp():
+    try:
+        os.makedirs(os.path.dirname(STAMP), exist_ok=True)
+        with open(STAMP, "w") as f:
+            f.write(str(time.time()))
+    except OSError:
+        pass
+
+
+def parse(s):
+    """'2026-11-18' -> date, '2026-11-18T14:30' -> datetime."""
+    if "T" in s:
+        return dt.datetime.strptime(s, "%Y-%m-%dT%H:%M")
+    return dt.datetime.strptime(s, "%Y-%m-%d").date()
+
+
+class Event:
+    def __init__(self, d):
+        self.raw = d
+        self.id, self.occurrence = d["id"], d["occurrence"]
+        self.title = d["title"] or "(no title)"
+        self.all_day = d["allDay"]
+        self.start, self.end = parse(d["start"]), parse(d["end"])
+        self.calendar, self.color = d["calendar"], d["color"]
+        self.location = d.get("location", "")
+        self.recurring, self.read_only = d.get("recurring"), d.get("readOnly")
+
+    def days(self):
+        """Every date the event is on."""
+        if self.all_day:
+            first, last = self.start, self.end
+        else:
+            first, last = self.start.date(), self.end.date()
+            if last > first and self.end.time() == dt.time(0, 0):
+                last -= dt.timedelta(days=1)
+        d = first
+        while d <= last:
+            yield d
+            d += dt.timedelta(days=1)
+
+    def times(self, day=None):
+        if self.all_day:
+            return "all day"
+        s = self.start.strftime("%H:%M") if day is None or self.start.date() == day else "··:··"
+        e = self.end.strftime("%H:%M") if day is None or self.end.date() == day else "··:··"
+        return f"{s}–{e}"
+
+
+def xterm(hexcolor):
+    """'#1badf8' -> nearest color in the 256-color cube."""
+    try:
+        r, g, b = (int(hexcolor[i:i + 2], 16) for i in (1, 3, 5))
+    except (ValueError, TypeError):
+        return 75
+    level = lambda v: 0 if v < 48 else 1 if v < 115 else (v - 35) // 40
+    return 16 + 36 * level(r) + 6 * level(g) + level(b)
+
+
+def width(text):
+    return sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in text)
+
+
+def clip(text, n):
+    """Cuts text to n terminal columns (wide characters count double)."""
+    if n <= 0:
+        return ""
+    if width(text) <= n:
+        return text
+    out, used = "", 0
+    for c in text:
+        cw = 2 if unicodedata.east_asian_width(c) in "WF" else 1
+        if used + cw > n - 1:
+            break
+        out, used = out + c, used + cw
+    return out + "…"
+
+
+def add_months(d, n):
+    m = d.month - 1 + n
+    y, m = d.year + m // 12, m % 12 + 1
+    return dt.date(y, m, min(d.day, cal_mod.monthrange(y, m)[1]))
+
+
+def parse_time(s):
+    """'9' '930' '9:30' '14.30' -> '09:30'-style string, or None."""
+    s = s.strip().replace(".", ":").replace("h", ":")
+    if not s:
+        return None
+    if ":" in s:
+        hh, _, mm = s.partition(":")
+    elif len(s) <= 2:
+        hh, mm = s, "0"
+    else:
+        hh, mm = s[:-2], s[-2:]
+    try:
+        h, m = int(hh), int(mm or 0)
+    except ValueError:
+        return None
+    return f"{h:02d}:{m:02d}" if 0 <= h < 24 and 0 <= m < 60 else None
+
+
+def parse_day(s, today):
+    """'2027-03-14', '2027-03' or '14' -> date, or None."""
+    s = s.strip()
+    try:
+        if len(s) == 10:
+            return dt.date.fromisoformat(s)
+        if len(s) == 7:
+            return dt.date(int(s[:4]), int(s[5:]), 1)
+        if s.isdigit():
+            return today.replace(day=int(s))
+    except ValueError:
+        pass
+    return None
+
+
+# ── add / edit form ────────────────────────────────────────────────────
+
+LABELS = {"title": "Title", "allday": "All day", "date": "Date", "until": "Until",
+          "start": "Starts", "end": "Ends", "location": "Where"}
+
+
+class Form:
+    def __init__(self, day, event=None):
+        self.event = event
+        self.error = ""
+        if event:
+            self.v = {
+                "title": event.raw["title"], "allday": event.all_day,
+                "date": event.raw["start"][:10],
+                "until": event.raw["end"][:10] if event.all_day else event.raw["start"][:10],
+                "start": "" if event.all_day else event.raw["start"][11:16],
+                "end": "" if event.all_day else event.raw["end"][11:16],
+                "location": event.location,
+            }
+            if event.all_day:
+                self.v["start"], self.v["end"] = "09:00", "10:00"
+        else:
+            now = dt.datetime.now()
+            hour = now.hour + 1 if day == now.date() and now.hour < 23 else 9
+            self.v = {"title": "", "allday": False, "date": day.isoformat(),
+                      "until": day.isoformat(), "start": f"{hour:02d}:00",
+                      "end": f"{min(hour + 1, 23):02d}:{'00' if hour < 23 else '59'}",
+                      "location": ""}
+        self.focus = 0
+
+    def fields(self):
+        middle = ["until"] if self.v["allday"] else ["start", "end"]
+        return ["title", "allday", "date", *middle, "location"]
+
+    def current(self):
+        return self.fields()[min(self.focus, len(self.fields()) - 1)]
+
+    def args(self):
+        """calhelper options for this form, or raises ValueError."""
+        v = self.v
+        title = v["title"].strip()
+        if not title:
+            raise ValueError("give it a title")
+        try:
+            day = dt.date.fromisoformat(v["date"].strip())
+        except ValueError:
+            raise ValueError("date looks like 2026-11-18")
+        opts = ["--title", title, "--location", v["location"].strip()]
+        if v["allday"]:
+            try:
+                until = dt.date.fromisoformat(v["until"].strip() or v["date"].strip())
+            except ValueError:
+                raise ValueError("until looks like 2026-11-18")
+            if until < day:
+                raise ValueError("until is before the date")
+            return opts + ["--all-day", "--start", day.isoformat(), "--end", until.isoformat()]
+        start, end = parse_time(v["start"]), parse_time(v["end"])
+        if not start:
+            raise ValueError("start time looks like 14:30")
+        if not end:
+            raise ValueError("end time looks like 15:30")
+        end_day = day + dt.timedelta(days=1) if end < start else day  # crosses midnight
+        if end == start:
+            end_day = day
+        return opts + ["--timed", "--start", f"{day}T{start}", "--end", f"{end_day}T{end}"]
+
+
+# ── the app ────────────────────────────────────────────────────────────
+
+class App:
+    def __init__(self, stdscr):
+        self.s = stdscr
+        self.today = dt.date.today()
+        self.sel = self.today
+        self.view = "month"
+        self.focus = "grid"  # or "list": choosing one of the selected day's events
+        self.idx = 0  # selected event of the selected day
+        self.form = None
+        self.confirm = None  # event waiting for y/n to delete
+        self.prompt = None  # text typed after g (go to date)
+        self.help = False
+        self.message, self.message_until = "", 0
+        self.error = None  # blocking error (no access, no helper)
+        self.events, self.by_day = [], {}
+        self.range, self.next_refresh, self.stamp = None, 0, 0
+        self.clicks = []  # (y0, x0, y1, x1, kind, value) from the last draw
+        self.last_click = (0, None)
+
+        curses.curs_set(0)
+        curses.use_default_colors()
+        self.rich = curses.COLORS >= 256
+        self.attrs, self.pairs = {}, {}
+        for name, (rich, basic) in PALETTE.items():
+            self.attrs[name] = self.pair(rich if self.rich else basic)
+        curses.mousemask(curses.ALL_MOUSE_EVENTS)
+        curses.mouseinterval(0)
+        stdscr.timeout(500)
+
+    def pair(self, fg, bg=-1):
+        key = (fg, bg)
+        if key not in self.pairs:
+            n = len(self.pairs) + 1
+            if n >= curses.COLOR_PAIRS:
+                return 0
+            curses.init_pair(n, fg, bg)
+            self.pairs[key] = curses.color_pair(n)
+        return self.pairs[key]
+
+    def color(self, name_or_hex, bg=-1):
+        if isinstance(name_or_hex, str) and name_or_hex.startswith("#"):
+            fg = xterm(name_or_hex) if self.rich else curses.COLOR_CYAN
+        else:
+            rich, basic = PALETTE[name_or_hex]
+            fg = rich if self.rich else basic
+        if bg != -1 and not self.rich:
+            bg = curses.COLOR_BLACK
+        return self.pair(fg, bg)
+
+    def put(self, y, x, text, color="gray", bold=False, bg=-1, reverse=False):
+        h, w = self.s.getmaxyx()
+        if not (0 <= y < h and 0 <= x < w) or not text:
+            return
+        attr = self.color(color, bg) | (curses.A_BOLD if bold else 0)
+        attr |= curses.A_REVERSE if reverse else 0
+        try:
+            self.s.addstr(y, x, clip(text, w - x) if width(text) > w - x else text, attr)
+        except curses.error:
+            pass
+
+    def fill(self, y, x, n, bg=SEL_BG):
+        self.put(y, x, " " * max(0, n), "white", bg=bg)
+
+    def say(self, text, seconds=3):
+        self.message, self.message_until = text, time.monotonic() + seconds
+
+    # ── data ───────────────────────────────────────────────────────────
+
+    def visible_range(self):
+        if self.view == "month":
+            weeks = cal_mod.Calendar(0).monthdatescalendar(self.sel.year, self.sel.month)
+            return weeks[0][0], weeks[-1][-1]
+        if self.view == "week":
+            monday = self.sel - dt.timedelta(days=self.sel.weekday())
+            return monday, monday + dt.timedelta(days=6)
+        if self.view == "year":
+            return dt.date(self.sel.year, 1, 1), dt.date(self.sel.year, 12, 31)
+        return self.sel, self.sel
+
+    def load(self, force=False):
+        stamp = os.path.getmtime(STAMP) if os.path.exists(STAMP) else 0
+        rng = self.visible_range()
+        if not force and rng == self.range and time.monotonic() < self.next_refresh \
+                and stamp == self.stamp:
+            return
+        first = self.range is None and not self.events
+        data, err = helper("list", rng[0].isoformat(), rng[1].isoformat(),
+                           timeout=120 if first else 20)
+        self.range, self.stamp = rng, stamp
+        self.next_refresh = time.monotonic() + REFRESH_SECONDS
+        if err:
+            if "access" in err or "calhelper" in err:
+                self.error = err
+            else:
+                self.say(err)
+            return
+        self.error = None
+        self.events = [Event(d) for d in data]
+        self.by_day = {}
+        for ev in self.events:
+            for d in ev.days():
+                self.by_day.setdefault(d, []).append(ev)
+        for evs in self.by_day.values():
+            evs.sort(key=lambda e: (not e.all_day, e.start if not e.all_day
+                                    else dt.datetime.combine(e.start, dt.time())))
+
+    def day_events(self, d=None):
+        return self.by_day.get(d or self.sel, [])
+
+    def selected_event(self):
+        evs = self.day_events()
+        return evs[min(self.idx, len(evs) - 1)] if evs else None
+
+    # ── moving around ──────────────────────────────────────────────────
+
+    def select(self, d):
+        if d != self.sel:
+            self.sel, self.idx = d, 0
+            if self.focus == "list":
+                self.focus = "grid"
+
+    def page(self, n):
+        if self.view == "day":
+            self.select(self.sel + dt.timedelta(days=n))
+        elif self.view == "week":
+            self.select(self.sel + dt.timedelta(days=7 * n))
+        elif self.view == "month":
+            self.select(add_months(self.sel, n))
+        else:
+            self.select(add_months(self.sel, 12 * n))
+
+    # ── drawing ────────────────────────────────────────────────────────
+
+    def draw(self):
+        s = self.s
+        h, w = s.getmaxyx()
+        s.erase()
+        self.clicks = []
+        if h < 8 or w < 30:
+            self.put(0, 0, "make me bigger", "dim")
+            s.refresh()
+            return
+        if self.error:
+            self.draw_error(h, w)
+            s.refresh()
+            return
+
+        self.draw_header(w)
+        bottom = h - 2  # last body row; h-1 is the status line
+        if self.view == "day":
+            self.draw_day(2, bottom, w)
+        else:
+            evs = self.day_events()
+            panel = min(max(4, len(evs) + 3), max(4, (h - 3) // 3))
+            body_end = bottom - panel
+            {"month": self.draw_month, "week": self.draw_week,
+             "year": self.draw_year}[self.view](2, body_end, w)
+            self.draw_panel(body_end + 1, bottom, w)
+        self.draw_status(h - 1, w)
+        if self.form:
+            self.draw_form(h, w)
+        elif self.help:
+            self.draw_help(h, w)
+        s.refresh()
+
+    def draw_header(self, w):
+        sel = self.sel
+        if self.view == "month":
+            title = f"{MONTHS[sel.month]} {sel.year}"
+        elif self.view == "week":
+            a, b = self.visible_range()
+            span = f"{a.day} {MONTHS[a.month][:3]}" if a.month != b.month else f"{a.day}"
+            title = f"{span} – {b.day} {MONTHS[b.month][:3]} {b.year}   week {sel.isocalendar()[1]}"
+        elif self.view == "day":
+            title = f"{WEEKDAYS[sel.weekday()]} {sel.day} {MONTHS[sel.month]} {sel.year}"
+        else:
+            title = str(sel.year)
+        self.put(0, 1, "‹ ", "dim")
+        self.put(0, 3, title, "white", bold=True)
+        self.put(0, 3 + width(title), " ›", "dim")
+        self.clicks.append((0, 1, 0, 2, "page", -1))
+        self.clicks.append((0, 3 + width(title), 0, 5 + width(title), "page", 1))
+        if sel != self.today:
+            x = 7 + width(title)
+            self.put(0, x, "t today", "dim")
+            self.clicks.append((0, x, 0, x + 6, "today", None))
+
+        x = w - 1
+        for v in reversed(VIEWS):
+            label = f" {v[0]} {v} "
+            x -= width(label)
+            if v == self.view:
+                self.put(0, x, label, "key", bold=True, reverse=True)
+            else:
+                self.put(0, x, label, "dim")
+            self.clicks.append((0, x, 0, x + width(label) - 1, "view", v))
+
+    def draw_month(self, top, bottom, w):
+        weeks = cal_mod.Calendar(0).monthdatescalendar(self.sel.year, self.sel.month)
+        cw = max(4, (w - 2) // 7)
+        for c, name in enumerate(WEEKDAYS):
+            self.put(top, 1 + c * cw + 1, name, "yellow" if c >= 5 else "gray")
+        top += 1
+        ch = max(1, (bottom - top + 1) // len(weeks))
+        for r, week in enumerate(weeks):
+            for c, d in enumerate(week):
+                self.draw_month_cell(top + r * ch, 1 + c * cw, ch, cw, d)
+
+    def draw_month_cell(self, y, x, ch, cw, d):
+        selected = d == self.sel
+        bg = SEL_BG if selected else -1
+        in_month = d.month == self.sel.month
+        evs = self.day_events(d)
+        self.clicks.append((y, x, y + ch - 1, x + cw - 1, "day", d))
+        if selected:
+            for i in range(ch):
+                self.fill(y + i, x, cw - 1)
+        # Top line: a faint rule with the day number on it.
+        if ch >= 3:
+            self.put(y, x, "─" * (cw - 1), "dim", bg=bg)
+        num = f" {d.day:>2} "
+        if d == self.today:
+            self.put(y, x, num, "key", bold=True, reverse=True)
+        else:
+            color = "white" if in_month and selected else "gray" if in_month else "dim"
+            self.put(y, x, num, color, bold=selected, bg=bg)
+        if ch == 1:
+            if evs:
+                self.put(y, x + 5, "•" * min(len(evs), cw - 6), evs[0].color, bg=bg)
+            return
+        room = ch - 1
+        shown = evs if len(evs) <= room else evs[:room - 1]
+        for i, ev in enumerate(shown):
+            label = ev.title if ev.all_day else f"{ev.start:%H:%M} {ev.title}" \
+                if ev.start.date() == d else ev.title
+            self.put(y + 1 + i, x + 1, "▎", ev.color, bg=bg)
+            self.put(y + 1 + i, x + 2, clip(label, cw - 3),
+                     "white" if in_month else "dim", bg=bg)
+        if len(shown) < len(evs):
+            self.put(y + room, x + 2, f"+{len(evs) - len(shown)} more", "dim", bg=bg)
+
+    def draw_week(self, top, bottom, w):
+        monday, _ = self.visible_range()
+        cw = max(6, (w - 2) // 7)
+        for c in range(7):
+            d = monday + dt.timedelta(days=c)
+            x = 1 + c * cw
+            selected = d == self.sel
+            bg = SEL_BG if selected else -1
+            self.clicks.append((top, x, bottom, x + cw - 1, "day", d))
+            if selected:
+                for y in range(top, bottom + 1):
+                    self.fill(y, x, cw - 1)
+            label = f" {WEEKDAYS[c]} {d.day} "
+            if d == self.today:
+                self.put(top, x, label, "key", bold=True, reverse=True)
+            else:
+                self.put(top, x, label, "yellow" if c >= 5 else "white", bold=selected, bg=bg)
+            self.put(top + 1, x, "─" * (cw - 1), "dim", bg=bg)
+            evs = self.day_events(d)
+            room = bottom - top - 1
+            shown = evs if len(evs) <= room else evs[:room - 1]
+            for i, ev in enumerate(shown):
+                y = top + 2 + i
+                self.put(y, x, "▎", ev.color, bg=bg)
+                t = "" if ev.all_day else (f"{ev.start:%H:%M} " if ev.start.date() == d else "")
+                self.put(y, x + 1, clip(t + ev.title, cw - 2), "white", bg=bg)
+            if len(shown) < len(evs):
+                self.put(top + 2 + len(shown), x + 1, f"+{len(evs) - len(shown)} more", "dim", bg=bg)
+            if not evs and room > 0:
+                self.put(top + 2, x + 1, "·", "dim", bg=bg)
+
+    def draw_year(self, top, bottom, w):
+        mw, mh = 22, 8  # one small month: " Mo Tu .. Su" is 21 columns
+        cols = max(1, min(6, (w - 2) // (mw + 2)))
+        while cols < 6 and -(-12 // cols) * (mh + 1) > bottom - top + 1 and (cols + 1) * (mw + 2) <= w - 2:
+            cols += 1
+        gap = max(2, ((w - 2) - cols * mw) // max(1, cols))
+        for m in range(1, 13):
+            r, c = divmod(m - 1, cols)
+            y, x = top + r * (mh + 1), 1 + c * (mw + gap)
+            if y + 1 > bottom:
+                break
+            current = m == self.sel.month
+            self.put(y, x + 1, MONTHS[m], "key" if current else "white", bold=current)
+            self.put(y + 1, x + 1, "Mo Tu We Th Fr Sa Su", "dim")
+            weeks = cal_mod.Calendar(0).monthdatescalendar(self.sel.year, m)
+            for wr, week in enumerate(weeks):
+                yy = y + 2 + wr
+                if yy > bottom:
+                    break
+                for wc, d in enumerate(week):
+                    if d.month != m:
+                        continue
+                    xx = x + 1 + wc * 3
+                    evs = self.day_events(d)
+                    text = f"{d.day:>2}"
+                    if d == self.sel:
+                        self.put(yy, xx, text, "white", bold=True, bg=SEL_BG, reverse=True)
+                    elif d == self.today:
+                        self.put(yy, xx, text, "key", bold=True, reverse=True)
+                    elif evs:
+                        self.put(yy, xx, text, evs[0].color, bold=True)
+                    else:
+                        self.put(yy, xx, text, "yellow" if wc >= 5 else "gray")
+                    self.clicks.append((yy, xx, yy, xx + 1, "day", d))
+
+    def draw_panel(self, top, bottom, w):
+        """The selected day's events, under the month / week / year grid."""
+        evs = self.day_events()
+        d = self.sel
+        self.put(top, 0, "─" * w, "dim")
+        head = f" {WEEKDAYS[d.weekday()]} {d.day} {MONTHS[d.month]} {d.year} "
+        self.put(top, 1, head, "white", bold=True)
+        count = f" {len(evs)} event{'s' * (len(evs) != 1)} " if evs else ""
+        self.put(top, 1 + width(head), count, "dim")
+        hint = " tab choose · e edit · x delete " if self.focus == "list" else " a add · tab choose "
+        self.put(top, w - width(hint) - 1, hint, "dim")
+        self.draw_event_rows(top + 1, bottom, w, evs, d)
+
+    def draw_event_rows(self, top, bottom, w, evs, d):
+        if not evs:
+            self.put(top, 2, "Nothing on this day. Press a to add something.", "dim")
+            return
+        room = bottom - top + 1
+        idx = min(self.idx, len(evs) - 1)
+        start = max(0, min(idx - room + 1, len(evs) - room)) if idx >= room else 0
+        for i, ev in enumerate(evs[start:start + room]):
+            n = start + i
+            y = top + i
+            chosen = self.focus == "list" and n == idx
+            bg = SEL_BG if chosen else -1
+            if chosen:
+                self.fill(y, 1, w - 2)
+            self.put(y, 1, "▌" if chosen else " ", "key", bg=bg)
+            self.put(y, 2, "█", ev.color, bg=bg)
+            self.put(y, 4, f"{ev.times(d):<11}", "gray", bg=bg)
+            x = 16
+            self.put(y, x, ev.title, "white", bold=chosen, bg=bg)
+            x += width(ev.title) + 2
+            extra = "  ".join(t for t in (ev.location, ev.calendar,
+                                           "repeats" if ev.recurring else "",
+                                           "read-only" if ev.read_only else "") if t)
+            self.put(y, x, clip(extra, w - x - 2), "dim", bg=bg)
+            self.clicks.append((y, 1, y, w - 2, "event", n))
+
+    def draw_day(self, top, bottom, w):
+        """A timeline of the selected day."""
+        evs = self.day_events()
+        d = self.sel
+        lines = []  # (label, event index or None)
+        for n, ev in enumerate(evs):
+            if ev.all_day:
+                lines.append(("all day", n))
+        timed = [(n, ev) for n, ev in enumerate(evs) if not ev.all_day]
+        hour_of = lambda ev: ev.start.hour if ev.start.date() == d else 0
+        hours = [hour_of(ev) for _, ev in timed]
+        first = min([8] + hours)
+        last = max([20] + [h for h in hours])
+        for hr in range(first, last + 1):
+            here = [n for n, ev in timed if hour_of(ev) == hr]
+            if not here:
+                lines.append((f"{hr:02d}:00", None))
+            for i, n in enumerate(here):
+                lines.append((f"{hr:02d}:00" if i == 0 else "", n))
+
+        room = bottom - top + 1
+        idx = min(self.idx, len(evs) - 1) if evs else -1
+        want = next((i for i, (_, n) in enumerate(lines) if n == idx), 0)
+        if self.view == "day" and not evs and d == self.today:
+            want = next((i for i, (l, _) in enumerate(lines) if l == f"{dt.datetime.now().hour:02d}:00"), 0)
+        start = max(0, min(want - room // 3, len(lines) - room))
+        now = dt.datetime.now()
+        for i, (label, n) in enumerate(lines[start:start + room]):
+            y = top + i
+            now_hour = d == self.today and label == f"{now.hour:02d}:00"
+            self.put(y, 1, f"{label:>7}", "red" if now_hour else "dim", bold=now_hour)
+            self.put(y, 9, "│", "red" if now_hour else "dim")
+            if n is None:
+                self.put(y, 10, "┄" * (w - 12), "dim") if now_hour else None
+                continue
+            ev = evs[n]
+            chosen = n == idx and self.focus == "list"
+            bg = SEL_BG if chosen else -1
+            if chosen:
+                self.fill(y, 10, w - 11)
+            self.put(y, 11, "█", ev.color, bg=bg)
+            self.put(y, 13, f"{ev.times(d):<11}", "gray", bg=bg)
+            self.put(y, 25, ev.title, "white", bold=True, bg=bg)
+            x = 27 + width(ev.title)
+            extra = "  ".join(t for t in (ev.location, ev.calendar) if t)
+            self.put(y, x, clip(extra, w - x - 2), "dim", bg=bg)
+            self.clicks.append((y, 10, y, w - 2, "event", n))
+        if not evs:
+            self.put(bottom, 11, "Nothing on this day. Press a to add something.", "dim")
+
+    def draw_status(self, y, w):
+        if self.confirm:
+            ev = self.confirm
+            what = "this occurrence of " if ev.recurring else ""
+            self.put(y, 1, f"delete {what}'{clip(ev.title, 40)}'? y/n", "red", bold=True)
+        elif self.prompt is not None:
+            self.put(y, 1, f"go to (2027-03-14, 2027-03 or a day): {self.prompt}▏", "key")
+        elif self.message and time.monotonic() < self.message_until:
+            self.put(y, 1, self.message, "yellow")
+        else:
+            hint = "←↓↑→ move  n/p page  a add  tab pick  e edit  x delete  m w d y view  g go to  ? keys"
+            self.put(y, 1, clip(hint, w - 2), "dim")
+
+    def box(self, top, left, h, w, title):
+        self.put(top, left, "╭" + "─" * (w - 2) + "╮", "key")
+        for y in range(top + 1, top + h - 1):
+            self.put(y, left, "│", "key")
+            self.put(y, left + 1, " " * (w - 2), "white")
+            self.put(y, left + w - 1, "│", "key")
+        self.put(top + h - 1, left, "╰" + "─" * (w - 2) + "╯", "key")
+        self.put(top, left + 2, f" {title} ", "white", bold=True)
+
+    def draw_form(self, h, w):
+        f = self.form
+        fields = f.fields()
+        bw = min(64, w - 4)
+        bh = len(fields) + 6
+        top, left = max(0, (h - bh) // 2), max(0, (w - bw) // 2)
+        title = "Edit event" if f.event else "New event"
+        self.box(top, left, bh, bw, title)
+        cur = f.current()
+        for i, name in enumerate(fields):
+            y = top + 2 + i
+            focused = name == cur
+            self.put(y, left + 2, f"{LABELS[name]:>8}", "key" if focused else "dim", bold=focused)
+            vx, vw = left + 12, bw - 14
+            if name == "allday":
+                text = "[x] yes" if f.v["allday"] else "[ ] no"
+                hint = "   space toggles" if focused else ""
+                self.put(y, vx, text + hint, "white" if focused else "gray", bg=SEL_BG if focused else -1)
+                continue
+            value = f.v[name]
+            if focused:
+                self.fill(y, vx, vw)
+                shown = value[-(vw - 2):] if width(value) > vw - 2 else value
+                self.put(y, vx, shown + "▏", "white", bold=True, bg=SEL_BG)
+            else:
+                placeholder = {"start": "14:30", "end": "15:30", "location": "optional"}.get(name, "")
+                self.put(y, vx, clip(value, vw) if value else placeholder,
+                         "gray" if value else "dim")
+        if f.error:
+            self.put(top + bh - 3, left + 2, clip(f.error, bw - 4), "red", bold=True)
+        elif f.event and f.event.recurring:
+            self.put(top + bh - 3, left + 2, "repeating event: only this occurrence changes", "dim")
+        self.put(top + bh - 2, left + 2, clip("tab/↓ next  ↑ back  enter save  esc cancel", bw - 4), "dim")
+
+    def draw_help(self, h, w):
+        lines = [
+            ("←↓↑→ / h j k l", "move the selected day"),
+            ("n / p  ] / [", "next / previous month (week, day, year)"),
+            ("N / P", "next / previous year"),
+            ("m  w  d  y", "month, week, day, year view"),
+            ("t", "back to today"),
+            ("g", "go to a date (2027-03-14, 2027-03, 14)"),
+            ("a / Enter", "add an event on the selected day"),
+            ("tab", "choose one of the day's events (j/k)"),
+            ("e / Enter", "edit the chosen event"),
+            ("x / Delete", "delete the chosen event (y/n)"),
+            ("r", "refresh from the Mac's calendar"),
+            ("mouse", "click a day, double-click to add, wheel pages"),
+            ("", ""),
+            ("in the form", "tab/↓ next field, ↑ back, space toggles all day,"),
+            ("", "enter saves, esc cancels. Times: 9, 930, 9:30"),
+        ]
+        bw, bh = min(70, w - 2), min(len(lines) + 4, h - 2)
+        top, left = max(0, (h - bh) // 2), max(0, (w - bw) // 2)
+        self.box(top, left, bh, bw, "calendar keys · any key closes")
+        for i, (k, desc) in enumerate(lines[:bh - 4]):
+            self.put(top + 2 + i, left + 2, f"{k:<15}", "key")
+            self.put(top + 2 + i, left + 18, clip(desc, bw - 20), "gray")
+
+    def draw_error(self, h, w):
+        lines = [(self.error, "red")]
+        if "access" in self.error:
+            lines += [
+                ("", "gray"),
+                ("The calendar needs permission to read your events:", "gray"),
+                ("System Settings → Privacy & Security → Calendars → Ghostty", "white"),
+                ("(Full Access). Then press r.", "gray"),
+            ]
+        else:
+            lines += [("", "gray"), ("Press r to try again.", "gray")]
+        top = max(0, h // 2 - len(lines) // 2)
+        for i, (text, color) in enumerate(lines):
+            self.put(top + i, max(1, (w - width(text)) // 2), clip(text, w - 2), color)
+
+    # ── actions ────────────────────────────────────────────────────────
+
+    def save_form(self):
+        f = self.form
+        try:
+            opts = f.args()
+        except ValueError as e:
+            f.error = str(e)
+            return
+        if f.event:
+            data, err = helper("update", f.event.id, f.event.occurrence, *opts)
+        else:
+            data, err = helper("add", *opts)
+        if err:
+            f.error = err
+            return
+        self.form = None
+        touch_stamp()
+        self.select(parse(data["start"]) if data["allDay"] else parse(data["start"]).date())
+        self.load(force=True)
+        evs = self.day_events()
+        self.idx = next((i for i, e in enumerate(evs) if e.id == data["id"]), 0)
+        self.focus = "list"
+        self.say(("updated: " if f.event else "added: ") + data["title"])
+
+    def delete(self, ev):
+        _, err = helper("delete", ev.id, ev.occurrence)
+        if err:
+            self.say(err, 5)
+            return
+        touch_stamp()
+        self.load(force=True)
+        self.idx = max(0, min(self.idx, len(self.day_events()) - 1))
+        if not self.day_events():
+            self.focus = "grid"
+        self.say(f"deleted: {ev.title}")
+
+    def edit(self):
+        ev = self.selected_event()
+        if not ev:
+            self.say("nothing to edit on this day")
+        elif ev.read_only:
+            self.say(f"'{ev.title}' is in {ev.calendar}, which is read-only")
+        else:
+            self.form = Form(self.sel, ev)
+
+    def ask_delete(self):
+        ev = self.selected_event()
+        if not ev:
+            self.say("nothing to delete on this day")
+        elif ev.read_only:
+            self.say(f"'{ev.title}' is in {ev.calendar}, which is read-only")
+        else:
+            self.confirm = ev
+
+    # ── keys ───────────────────────────────────────────────────────────
+
+    def form_key(self, k):
+        f = self.form
+        fields = f.fields()
+        name = f.current()
+        if k in ("\x1b",):
+            self.form = None
+        elif k in ("\n", "\r", curses.KEY_ENTER):
+            self.save_form()
+        elif k in ("\t", curses.KEY_DOWN):
+            f.focus = (fields.index(name) + 1) % len(fields)
+        elif k in (curses.KEY_BTAB, curses.KEY_UP):
+            f.focus = (fields.index(name) - 1) % len(fields)
+        elif name == "allday":
+            if k in (" ", "x", "y", "n", curses.KEY_LEFT, curses.KEY_RIGHT):
+                f.v["allday"] = (not f.v["allday"]) if k not in ("y", "n") else k == "y"
+                f.focus = f.fields().index("allday")
+        elif k in ("\x7f", "\b", curses.KEY_BACKSPACE):
+            f.v[name] = f.v[name][:-1]
+        elif k == "\x15":  # Ctrl+U clears the field
+            f.v[name] = ""
+        elif isinstance(k, str) and k.isprintable():
+            f.v[name] += k
+        f.error = "" if k not in ("\n", "\r", curses.KEY_ENTER) else f.error
+
+    def key(self, k):
+        """Handles one key; returns False to quit."""
+        if self.form:
+            self.form_key(k)
+            return True
+        if self.help:
+            self.help = False
+            return True
+        if self.confirm:
+            ev, self.confirm = self.confirm, None
+            if k in ("y", "Y"):
+                self.delete(ev)
+            return True
+        if self.prompt is not None:
+            if k == "\x1b":
+                self.prompt = None
+            elif k in ("\n", "\r", curses.KEY_ENTER):
+                d = parse_day(self.prompt, self.sel)
+                self.prompt = None
+                if d:
+                    self.select(d)
+                else:
+                    self.say("couldn't read that date")
+            elif k in ("\x7f", "\b", curses.KEY_BACKSPACE):
+                self.prompt = self.prompt[:-1]
+            elif isinstance(k, str) and k.isprintable():
+                self.prompt += k
+            return True
+
+        if k == curses.KEY_MOUSE:
+            self.mouse()
+            return True
+        if k == "q":
+            return False
+        if k == "?":
+            self.help = True
+        elif k == "r":
+            self.load(force=True)
+            self.say("refreshed")
+        elif k in ("m", "w", "d", "y"):
+            self.view = {"m": "month", "w": "week", "d": "day", "y": "year"}[k]
+            if self.view == "day" and self.day_events():
+                self.focus = "list"
+        elif k == "t":
+            self.select(dt.date.today())
+        elif k == "g":
+            self.prompt = ""
+        elif k in ("n", "]", curses.KEY_NPAGE):
+            self.page(1)
+        elif k in ("p", "[", curses.KEY_PPAGE):
+            self.page(-1)
+        elif k in ("N", "}"):
+            self.select(add_months(self.sel, 12))
+        elif k in ("P", "{"):
+            self.select(add_months(self.sel, -12))
+        elif k == "a":
+            self.form = Form(self.sel)
+        elif k == "e":
+            self.edit()
+        elif k in ("x", curses.KEY_DC, "\x7f", curses.KEY_BACKSPACE):
+            self.ask_delete()
+        elif k == "\t":
+            if self.focus == "list" or not self.day_events():
+                self.focus = "grid"
+            else:
+                self.focus = "list"
+        elif k == "\x1b":
+            self.focus = "grid"
+        elif self.focus == "list":
+            self.list_key(k)
+        else:
+            self.grid_key(k)
+        return True
+
+    def list_key(self, k):
+        evs = self.day_events()
+        if k in ("j", curses.KEY_DOWN):
+            self.idx = min(self.idx + 1, len(evs) - 1)
+        elif k in ("k", curses.KEY_UP):
+            if self.idx == 0 and self.view != "day":
+                self.focus = "grid"
+            self.idx = max(self.idx - 1, 0)
+        elif k in ("\n", "\r", curses.KEY_ENTER):
+            self.edit()
+        elif k in ("h", "l", curses.KEY_LEFT, curses.KEY_RIGHT):
+            self.focus = "grid"
+            self.grid_key(k)
+
+    def grid_key(self, k):
+        step = {"h": -1, curses.KEY_LEFT: -1, "l": 1, curses.KEY_RIGHT: 1,
+                "k": -7, curses.KEY_UP: -7, "j": 7, curses.KEY_DOWN: 7}.get(k)
+        if step is not None:
+            if self.view == "day" and abs(step) == 7:
+                if self.day_events():  # up/down in day view walks the events
+                    self.focus = "list"
+                    self.list_key(k)
+                    return
+            self.select(self.sel + dt.timedelta(days=step))
+        elif k in ("\n", "\r", curses.KEY_ENTER):
+            self.form = Form(self.sel)
+
+    def mouse(self):
+        try:
+            _, x, y, _, bstate = curses.getmouse()
+        except curses.error:
+            return
+        wheel_up = getattr(curses, "BUTTON4_PRESSED", 0)
+        wheel_down = getattr(curses, "BUTTON5_PRESSED", 0x200000)
+        if bstate & wheel_up:
+            self.page(-1)
+            return
+        if bstate & wheel_down:
+            self.page(1)
+            return
+        if not bstate & (curses.BUTTON1_PRESSED | curses.BUTTON1_CLICKED):
+            return
+        if self.form or self.help or self.confirm:
+            return
+        hit = next((c for c in reversed(self.clicks)
+                    if c[0] <= y <= c[2] and c[1] <= x <= c[3]), None)
+        if not hit:
+            return
+        kind, value = hit[4], hit[5]
+        now = time.monotonic()
+        double = self.last_click[1] == (kind, value) and now - self.last_click[0] < DOUBLE_CLICK
+        self.last_click = (now, (kind, value))
+        if kind == "day":
+            self.select(value)
+            self.focus = "grid"
+            if double:
+                self.form = Form(value)
+        elif kind == "event":
+            self.focus, self.idx = "list", value
+            if double:
+                self.edit()
+        elif kind == "view":
+            self.view = value
+        elif kind == "page":
+            self.page(value)
+        elif kind == "today":
+            self.select(dt.date.today())
+
+
+def read_key(stdscr):
+    """Next key: a str for characters (UTF-8 decoded), an int for curses keys.
+    Raises curses.error when nothing was pressed (this curses has no get_wch)."""
+    ch = stdscr.getch()
+    if ch == -1:
+        raise curses.error("no input")
+    if ch >= 256:
+        return ch
+    if ch < 0x80:
+        return chr(ch)
+    need = 1 if ch >> 5 == 0b110 else 2 if ch >> 4 == 0b1110 else 3 if ch >> 3 == 0b11110 else 0
+    raw = bytes([ch])
+    for _ in range(need):
+        nxt = stdscr.getch()
+        if not 0x80 <= nxt < 0xC0:
+            break
+        raw += bytes([nxt])
+    return raw.decode("utf-8", "replace")
+
+
+def main(stdscr):
+    app = App(stdscr)
+    while True:
+        if dt.date.today() != app.today:  # midnight passed
+            app.today = dt.date.today()
+        app.load()
+        app.draw()
+        try:
+            k = read_key(stdscr)
+        except curses.error:
+            continue
+        except KeyboardInterrupt:
+            return
+        if k == curses.KEY_RESIZE:
+            continue
+        if not app.key(k):
+            return
+
+
+if __name__ == "__main__":
+    locale.setlocale(locale.LC_ALL, "")
+    os.environ.setdefault("ESCDELAY", "25")
+    try:
+        curses.wrapper(main)
+    except KeyboardInterrupt:
+        pass

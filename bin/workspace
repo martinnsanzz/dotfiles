@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Launched by Ghostty on every new window. Builds (or reattaches to) the
-# tmux session "main" with just the home tab. Claude and developer tabs
-# open on demand with Option+c / Option+d (see bin/dev).
+# tmux session "main" with the home and calendar tabs. Claude and developer
+# tabs open on demand with Option+c / Option+d (see bin/dev).
 #
 #   1:home
 #   ┌─────────┬───────────┬──────────────┐
@@ -13,8 +13,14 @@
 #   │                                    │
 #   └────────────────────────────────────┘
 #
-# Home can't be closed: Option+x / Option+w refuse (see tmux.conf) and a pane
-# whose shell exits gets a fresh shell instead of disappearing.
+#   2:calendar
+#   ┌────────────────────────────┬───────┐
+#   │  day/week/month/year       │ today │
+#   │  (bin/calendar)            │       │
+#   └────────────────────────────┴───────┘
+#
+# Neither can be closed: Option+x / Option+w refuse (see tmux.conf) and a pane
+# whose program exits gets restarted instead of disappearing.
 
 # Apps launched from the Dock don't get Homebrew on PATH.
 export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
@@ -46,10 +52,18 @@ tmux send-keys -t "$info_pane" 'sysinfo' Enter
 tmux send-keys -t "$procs_pane" 'procs' Enter
 tmux send-keys -t "$art_pane" 'home-art' Enter
 
-# Lock home: tmux.conf's close keys check @locked, and dead panes respawn.
-tmux set-option -w -t "$SESSION:home" @locked 1
-tmux set-option -w -t "$SESSION:home" remain-on-exit on
-tmux set-hook -w -t "$SESSION:home" pane-died respawn-pane
+# Calendar tab: the calendar itself, with today's events on the right. The
+# panes run the programs directly, so quitting one restarts it (see lock).
+cal_pane=$(tmux new-window -d -n calendar -c "$HOME" -P -F '#{pane_id}' "exec $HOME/.local/bin/calendar")
+tmux split-window -d -h -l 25% -t "$cal_pane" -c "$HOME" "exec $HOME/.local/bin/calendar-today"
 
+# Lock both: tmux.conf's close keys check @locked, and dead panes respawn.
+for tab in home calendar; do
+	tmux set-option -w -t "$SESSION:$tab" @locked 1
+	tmux set-option -w -t "$SESSION:$tab" remain-on-exit on
+	tmux set-hook -w -t "$SESSION:$tab" pane-died respawn-pane
+done
+
+tmux select-window -t "$SESSION:home"
 tmux select-pane -t "$term_pane"
 exec tmux attach-session -t "$SESSION"

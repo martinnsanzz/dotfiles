@@ -1,0 +1,190 @@
+#!/usr/bin/env python3
+"""Today's events, for the right-hand pane of the calendar tab.
+
+All-day events first, then the timed ones with their times. Past events are
+dimmed and the one happening now is highlighted. Reloads every 30 seconds,
+right after bin/calendar adds/edits/deletes something, and at midnight.
+q quits to the shell.
+"""
+
+import curses
+import datetime as dt
+import json
+import locale
+import os
+import subprocess
+import textwrap
+import time
+
+HELPER = os.path.expanduser("~/.local/bin/calhelper")
+STAMP = os.path.expanduser("~/.cache/dotfiles-calendar.stamp")
+REFRESH_SECONDS = 30
+
+PALETTE = {
+    "dim": (240, curses.COLOR_WHITE),
+    "gray": (245, curses.COLOR_WHITE),
+    "white": (255, curses.COLOR_WHITE),
+    "key": (75, curses.COLOR_BLUE),
+    "yellow": (221, curses.COLOR_YELLOW),
+    "red": (203, curses.COLOR_RED),
+    "green": (114, curses.COLOR_GREEN),
+}
+WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+MONTHS = ("", "January", "February", "March", "April", "May", "June", "July",
+          "August", "September", "October", "November", "December")
+
+
+def fetch(day):
+    """(events, error) for one day."""
+    try:
+        p = subprocess.run([HELPER, "list", day.isoformat(), day.isoformat()],
+                           capture_output=True, text=True, timeout=120)
+        data = json.loads(p.stdout or "null")
+    except FileNotFoundError:
+        return [], "calhelper isn't built: run ./install.sh links"
+    except (subprocess.TimeoutExpired, ValueError):
+        return [], "couldn't read the calendar"
+    if isinstance(data, dict):
+        err = data.get("error", "calhelper failed")
+        return [], ("no calendar access: see the calendar pane" if "access" in err else err)
+    return data, None
+
+
+def xterm(hexcolor):
+    try:
+        r, g, b = (int(hexcolor[i:i + 2], 16) for i in (1, 3, 5))
+    except (ValueError, TypeError):
+        return 75
+    level = lambda v: 0 if v < 48 else 1 if v < 115 else (v - 35) // 40
+    return 16 + 36 * level(r) + 6 * level(g) + level(b)
+
+
+def wrap(text, n):
+    """Splits text into lines of at most n columns."""
+    return textwrap.wrap(text, max(1, n)) or [""]
+
+
+class Pane:
+    def __init__(self, stdscr):
+        self.s = stdscr
+        self.day = dt.date.today()
+        self.events, self.error = [], None
+        self.next_refresh, self.stamp = 0, None
+        curses.curs_set(0)
+        curses.use_default_colors()
+        self.rich = curses.COLORS >= 256
+        self.pairs = {}
+        stdscr.timeout(1000)
+
+    def attr(self, color):
+        if color.startswith("#"):
+            fg = xterm(color) if self.rich else curses.COLOR_CYAN
+        else:
+            rich, basic = PALETTE[color]
+            fg = rich if self.rich else basic
+        if fg not in self.pairs:
+            n = len(self.pairs) + 1
+            curses.init_pair(n, fg, -1)
+            self.pairs[fg] = curses.color_pair(n)
+        return self.pairs[fg]
+
+    def put(self, y, x, text, color="gray", bold=False):
+        h, w = self.s.getmaxyx()
+        if 0 <= y < h and 0 <= x < w and text:
+            try:
+                self.s.addstr(y, x, text[:w - x], self.attr(color) | (curses.A_BOLD if bold else 0))
+            except curses.error:
+                pass
+
+    def maybe_reload(self):
+        stamp = os.path.getmtime(STAMP) if os.path.exists(STAMP) else 0
+        today = dt.date.today()
+        if today != self.day or stamp != self.stamp or time.monotonic() >= self.next_refresh:
+            self.day, self.stamp = today, stamp
+            self.events, self.error = fetch(today)
+            self.next_refresh = time.monotonic() + REFRESH_SECONDS
+
+    def draw(self):
+        s = self.s
+        h, w = s.getmaxyx()
+        s.erase()
+        d = self.day
+        now = dt.datetime.now()
+        self.put(0, 1, "Today", "key", bold=True)
+        self.put(0, w - 6, now.strftime("%H:%M"), "dim")
+        self.put(1, 1, f"{WEEKDAYS[d.weekday()]} {d.day} {MONTHS[d.month]}", "white")
+        self.put(2, 1, "─" * (w - 2), "dim")
+        y = 3
+        if self.error:
+            for line in wrap(self.error, w - 2):
+                self.put(y, 1, line, "red")
+                y += 1
+            s.refresh()
+            return
+        if not self.events:
+            self.put(y + 1, 1, "Nothing today", "gray", bold=True)
+            self.put(y + 2, 1, "Your day is free.", "dim")
+            s.refresh()
+            return
+
+        next_up = None
+        inner = w - 3
+        for ev in self.events:
+            if y >= h - 1:
+                self.put(h - 1, 1, "…more", "dim")
+                break
+            title = ev["title"] or "(no title)"
+            if ev["allDay"]:
+                when, state = "all day", "allday"
+            else:
+                start = dt.datetime.strptime(ev["start"], "%Y-%m-%dT%H:%M")
+                end = dt.datetime.strptime(ev["end"], "%Y-%m-%dT%H:%M")
+                s_txt = start.strftime("%H:%M") if start.date() == d else "earlier"
+                e_txt = end.strftime("%H:%M") if end.date() == d else "later"
+                when = f"{s_txt}–{e_txt}"
+                state = "past" if end <= now else "now" if start <= now else "later"
+                if state == "later" and next_up is None:
+                    next_up = start
+            time_color = {"past": "dim", "now": "green", "later": "white", "allday": "yellow"}[state]
+            title_color = "dim" if state == "past" else "white"
+            self.put(y, 1, "█", "dim" if state == "past" else ev.get("color", "#89b4fa"))
+            self.put(y, 3, when, time_color, bold=state == "now")
+            if state == "now":
+                self.put(y, 3 + len(when) + 1, "now", "green", bold=True)
+            y += 1
+            for line in wrap(title, inner)[:3]:
+                self.put(y, 3, line, title_color, bold=state != "past")
+                y += 1
+            if ev.get("location") and y < h - 1:
+                self.put(y, 3, ev["location"][:inner], "dim")
+                y += 1
+            y += 1
+
+        if next_up and y < h:
+            mins = int((next_up - now).total_seconds() // 60) + 1
+            left = f"{mins} min" if mins < 60 else f"{mins // 60}h {mins % 60:02d}m"
+            self.put(h - 1, 1, f"next in {left}"[:w - 2], "key")
+        s.refresh()
+
+
+def main(stdscr):
+    pane = Pane(stdscr)
+    while True:
+        pane.maybe_reload()
+        pane.draw()
+        try:
+            k = stdscr.getch()
+        except KeyboardInterrupt:
+            return
+        if k == ord("q"):
+            return
+        if k == ord("r"):
+            pane.next_refresh = 0
+
+
+if __name__ == "__main__":
+    locale.setlocale(locale.LC_ALL, "")
+    try:
+        curses.wrapper(main)
+    except KeyboardInterrupt:
+        pass

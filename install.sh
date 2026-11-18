@@ -58,6 +58,22 @@ link_nvim() {
 	echo "linked  $dest"
 }
 
+# The calendar tab's bridge to the Mac's Calendar (and so iCloud / iPhone).
+# Compiled from calendar/calhelper.swift with the Xcode command line tools.
+build_calhelper() {
+	local src="$DOTFILES/calendar/calhelper.swift" out="$HOME/.local/bin/calhelper"
+	if ! command -v swiftc >/dev/null 2>&1; then
+		echo "skip    calhelper (no swiftc: run xcode-select --install)"
+		return
+	fi
+	if [ -x "$out" ] && [ ! -L "$out" ] && [ "$out" -nt "$src" ]; then
+		echo "ok      $out"
+		return
+	fi
+	mkdir -p "$(dirname "$out")"
+	swiftc -O "$src" -o "$out" && echo "built   $out"
+}
+
 link_configs() {
 	link ghostty/config   "$HOME/.config/ghostty/config"
 	link tmux/tmux.conf   "$HOME/.config/tmux/tmux.conf"
@@ -73,6 +89,7 @@ link_configs() {
 		chmod +x "$script"
 		link "bin/$(basename "$script")" "$HOME/.local/bin/$(basename "$script")"
 	done
+	build_calhelper
 }
 
 case "${1:-all}" in

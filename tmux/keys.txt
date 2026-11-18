@@ -7,7 +7,7 @@
                       enter open, → into folder, ← back
    Option+t           new shell tab
    Option+r           rename tab
-   Option+x           close tab (home can't be closed)
+   Option+x           close tab (not home or calendar)
 
  PANES
    Option+arrows      move left/down/up/right
@@ -22,6 +22,18 @@
    j/k  Ctrl+u/d      move / page in history
    v then y           select, copy to clipboard
    q                  back to normal
+
+ CALENDAR (tab 2, Option+2)
+   ←↓↑→ / hjkl        move the selected day
+   n / p   N / P      next / prev page, next / prev year
+   m  w  d  y         month, week, day, year view
+   t   g              today, go to a date (2027-03-14)
+   a / Enter          add an event on the selected day
+   tab  j/k           choose one of the day's events
+   e / x              edit / delete it (asks y/n)
+   form: tab next field, space all day, enter save, esc
+   mouse              click day, double-click adds
+   ?                  every calendar key
 
  HOME TAB APPS / SERVICES (procs pane focused)
    j/k  tab           move, switch apps ⇄ services
