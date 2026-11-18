@@ -32,17 +32,18 @@ Two more kinds of tab open on a project picker (`~` and the folders in `~/Projec
 ```
 
 - `Option+c` opens a **claude** tab (above) for any folder in `~/Projects`.
-- `Option+d` opens a **developer** tab, for working on Codam projects. The tree, the terminal and nvim all start in that project. nvim shows "waiting for a file" until you pick one in the tree. After that, each file you pick opens as a new tab in that same nvim.
+- `Option+d` opens a **developer** tab, for working on Codam projects: just nvim, full screen, opened on that project (`nvim .`). The nvim config brings its own file tree and terminal, so the tab needs nothing else.
 
 ```
  3 developer:libasm
-┌──────────┬───────────────────┐
-│yazi tree │                   │
-│          │       nvim        │
-├──────────┤ (waiting for file │
-│ terminal │  until you pick)  │
-└──────────┴───────────────────┘
+┌──────────────────────────────┐
+│                              │
+│      nvim . (the project)    │
+│                              │
+└──────────────────────────────┘
 ```
+
+In a claude tab the tree previews the hovered file in its own right-hand column.
 
 ## Install
 
@@ -59,8 +60,8 @@ Then open Ghostty (`open -a Ghostty`). `./install.sh links` only re-creates the 
 |---|---|---|
 | [Ghostty](https://ghostty.org) | The terminal app. | It's the window. On launch it runs `bin/workspace`. |
 | [tmux](https://github.com/tmux/tmux) | A terminal multiplexer. | Tabs (tmux "windows") and panes. The session keeps running after Ghostty closes. |
-| [yazi](https://yazi-rs.github.io) | A terminal file manager. | The file tree. Enter or a click opens a file in nvim. |
-| [Neovim](https://neovim.io) | The text editor. | Set up like VS Code, in its own repo: [nvim-config](../nvim-config). `vim/vimrc` stays for plain `vim`. |
+| [yazi](https://yazi-rs.github.io) | A terminal file manager. | The file tree in claude tabs. Hovering a file previews it; Enter or a click opens it in nvim. |
+| [Neovim](https://neovim.io) | The text editor. | Set up like VS Code, in its own repo: [nvim-config](../nvim-config). It fills the whole developer tab. `vim/vimrc` stays for plain `vim`. |
 | [Claude Code](https://claude.com/claude-code) | AI coding assistant. | The left pane of each claude tab. |
 | [btop](https://github.com/aristocratos/btop) | A live system monitor. | Not on the home tab any more; run `btop` for the full view (plain gray/blue theme). |
 | [fzf](https://github.com/junegunn/fzf) | A fuzzy finder. | The project picker behind `Option+c` and `Option+d`. |
@@ -71,13 +72,12 @@ Then open Ghostty (`open -a Ghostty`). `./install.sh links` only re-creates the 
 
 1. `ghostty/config` sets `command = .../workspace`, so every Ghostty window runs that script instead of a plain shell. `macos-option-as-alt` makes the Option key work for tmux shortcuts, and `background-opacity` makes the window see-through.
 2. `bin/workspace` creates the tmux session `main` with only the home tab. If `main` already exists, it reattaches instead. That's why closing Ghostty loses nothing. It marks home with the tmux option `@locked`: `Option+x`/`Option+w` in `tmux.conf` refuse to close a locked tab (or its last pane), and a pane whose shell exits there gets a fresh shell instead of closing.
-3. `bin/dev claude [folder]` builds a claude/tree/terminal tab, and `bin/dev developer [folder]` builds a tree/terminal/nvim tab. With `--pick` it first shows an fzf list of `~` and the folders in `~/Projects`.
-4. In a developer tab the editor pane runs `bin/dev-editor`, which shows the waiting screen. The first file you pick starts nvim there, listening on a socket named after the pane. Later picks are sent through that socket (`nvim --remote`) and open as new tabs; quitting nvim brings the waiting screen back.
-5. `bin/home-art` plays looping ASCII animations across the bottom of the home tab, with the main shortcuts boxed in its top-right corner. It's Python (curses, standard library only), using the `python3` that comes with the Xcode command line tools.
-6. `bin/sysinfo` and `bin/procs` fill the top-left of home. Both are Python curses like `home-art`. sysinfo reads CPU ticks straight from the kernel, procs reads `ps` and `lsappinfo` every 2 seconds. `btop/btop.conf` is kept for running btop by hand.
-7. yazi's `open-vim` plugin (`yazi/plugins/`, bound in `yazi/keymap.toml` and `yazi/init.lua`) opens files with `bin/yazi-vim`. In a claude tab it swaps nvim into the tree's pane right away, and quitting nvim brings the tree back. In a developer tab it sends the file to the nvim pane on the right. (yazi's built-in way of running an editor in its pane takes about 5 seconds to start.)
-8. `bin/flash` shows a short message in a centered tmux popup. `Ctrl+b r` uses it to confirm the tmux config reloaded. Ghostty's `Cmd+Shift+R` reloads Ghostty and then types a private key code that tmux binds (`User0`) to the same popup.
-9. `install.sh` symlinks each file in this repo to the place the app reads it from. Editing a file here changes the live config.
+3. `bin/dev claude [folder]` builds a claude/tree/terminal tab, and `bin/dev developer [folder]` opens a tab running `nvim .` in the folder. With `--pick` it first shows an fzf list of `~` and the folders in `~/Projects`.
+4. `bin/home-art` plays looping ASCII animations across the bottom of the home tab, with the main shortcuts boxed in its top-right corner. It's Python (curses, standard library only), using the `python3` that comes with the Xcode command line tools.
+5. `bin/sysinfo` and `bin/procs` fill the top-left of home. Both are Python curses like `home-art`. sysinfo reads CPU ticks straight from the kernel, procs reads `ps` and `lsappinfo` every 2 seconds. `btop/btop.conf` is kept for running btop by hand.
+6. yazi's `open-vim` plugin (`yazi/plugins/`, bound in `yazi/keymap.toml` and `yazi/init.lua`) opens files with `bin/yazi-vim`, which swaps nvim into the tree's pane right away; quitting nvim brings the tree back. (yazi's built-in way of running an editor in its pane takes about 5 seconds to start.)
+7. `bin/flash` shows a short message in a centered tmux popup. `Ctrl+b r` uses it to confirm the tmux config reloaded. Ghostty's `Cmd+Shift+R` reloads Ghostty and then types a private key code that tmux binds (`User0`) to the same popup.
+8. `install.sh` symlinks each file in this repo to the place the app reads it from. Editing a file here changes the live config.
 
 | Repo file | Linked to |
 |---|---|
@@ -157,7 +157,8 @@ The mouse still works as a fallback.
 | Keys | Action |
 |---|---|
 | `j`/`k` | Move down/up |
-| `l` / `Enter` / click | Open folder / open file in nvim (in a developer tab, in the right pane) |
+| `l` / `Enter` / click | Open folder / open file in nvim |
+| (hover) | Preview the file in yazi's right column |
 | `h` | Go up a folder |
 | `a` | Create a file (end the name with `/` to make a folder) |
 | `r` | Rename |
@@ -197,6 +198,6 @@ tmux catches these Option shortcuts before the program in the pane sees them. Fo
 ## Troubleshooting
 
 - **Start the layout fresh:** run `tmux kill-server`, then open a new Ghostty window.
-- **A pane's program exited:** the pane falls back to a shell. Type `claude`, `yazi`, `sysinfo`, `procs` or `home-art` to start it again. The developer tab's nvim pane can't fall back to a shell: quitting nvim shows the waiting screen again.
+- **A pane's program exited:** the pane falls back to a shell. Type `claude`, `yazi`, `sysinfo`, `procs` or `home-art` to start it again. In a developer tab, quitting nvim leaves a shell in the project; type `nvim .` to reopen it.
 - **Ghostty opens a plain shell:** tmux isn't installed or isn't on PATH. Run `./install.sh tools`.
 - **nvim says a language server failed to install:** run `:Mason` to see why. If npm complains about root-owned files in `~/.npm`, run `sudo chown -R $(id -u):$(id -g) ~/.npm` once.

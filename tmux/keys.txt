@@ -38,7 +38,7 @@
  YAZI (file tree)
    j/k  h/l           down/up, parent/enter folder
    Enter              open file in nvim
-                      (developer tab: in the right pane)
+   (hover)            preview the file in the right column
    a  r  d            create, rename, trash
    Space  y  x  p     select, copy, cut, paste
    .                  show/hide hidden files

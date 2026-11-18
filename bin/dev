@@ -2,14 +2,14 @@
 # Opens a claude or developer tab in tmux:
 #
 #   claude (Option+c)                   developer (Option+d)
-#   ┌──────────────┬──────────────┐     ┌──────────┬───────────────────┐
-#   │              │  yazi tree   │     │yazi tree │                   │
-#   │   claude     │ (Enter→vim)  │     │(project) │  vim (project)    │
-#   │  (project)   │     (~)      │     │          │                   │
-#   │              ├──────────────┤     ├──────────┤  waits for a file │
-#   │              │ fish terminal│     │ terminal │  from the tree    │
-#   │              │     (~)      │     │(project) │                   │
-#   └──────────────┴──────────────┘     └──────────┴───────────────────┘
+#   ┌──────────────┬──────────────┐     ┌──────────────────────────────┐
+#   │              │  yazi tree   │     │                              │
+#   │   claude     │ (Enter→nvim) │     │  nvim . (project), the whole │
+#   │  (project)   │     (~)      │     │  tab: its own file tree and  │
+#   │              ├──────────────┤     │  terminal live inside nvim   │
+#   │              │ fish terminal│     │                              │
+#   │              │     (~)      │     │                              │
+#   └──────────────┴──────────────┘     └──────────────────────────────┘
 #
 # Usage: dev claude|developer [dir]   open the tab in dir (default: current folder)
 #        dev claude|developer --pick  choose a folder with fzf first
@@ -103,7 +103,7 @@ dir=${dir:-$PWD}
 name=$kind
 [ "$dir" != "$HOME" ] && name="$kind:$(basename "$dir")"
 
-# The first pane: claude in a claude tab, the tree in a developer tab.
+# The first pane: claude in a claude tab, nvim in a developer tab.
 if [ -n "$here" ]; then
 	main=$TMUX_PANE
 	tmux rename-window -t "$main" "$name"
@@ -131,13 +131,6 @@ if [ "$kind" = claude ]; then
 	tmux send-keys -t "$tree_pane" 'yazi' Enter
 	tmux select-pane -t "$main"
 else
-	# Everything works in the project. The editor pane runs dev-editor, which
-	# waits for yazi (bin/yazi-vim) to send it a file. @dev-editor marks the
-	# pane and remembers the project folder.
-	editor=$(tmux split-window -h -l 70% -t "$main" -c "$dir" -P -F '#{pane_id}' \
-		"$HOME/.local/bin/dev-editor")
-	tmux set -p -t "$editor" @dev-editor "$dir"
-	tmux split-window -v -l 35% -t "$main" -c "$dir"
-	start_main yazi
-	tmux select-pane -t "$main"
+	# nvim's config opens its file tree and terminal for `nvim .` (nvim-config).
+	start_main 'nvim .'
 fi
