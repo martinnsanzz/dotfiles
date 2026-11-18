@@ -92,6 +92,8 @@ class Event:
         self.calendar, self.color = d["calendar"], d["color"]
         self.location = d.get("location", "")
         self.recurring, self.read_only = d.get("recurring"), d.get("readOnly")
+        # No end time: saved as ending the moment it starts.
+        self.open_ended = not self.all_day and self.end == self.start
 
     def days(self):
         """Every date the event is on."""
@@ -110,6 +112,8 @@ class Event:
         if self.all_day:
             return "all day"
         s = self.start.strftime("%H:%M") if day is None or self.start.date() == day else "··:··"
+        if self.open_ended:
+            return s
         e = self.end.strftime("%H:%M") if day is None or self.end.date() == day else "··:··"
         return f"{s}–{e}"
 
@@ -198,7 +202,7 @@ class Form:
                 "date": event.raw["start"][:10],
                 "until": event.raw["end"][:10] if event.all_day else event.raw["start"][:10],
                 "start": "" if event.all_day else event.raw["start"][11:16],
-                "end": "" if event.all_day else event.raw["end"][11:16],
+                "end": "" if event.all_day or event.open_ended else event.raw["end"][11:16],
                 "location": event.location,
             }
             if event.all_day:
@@ -241,11 +245,11 @@ class Form:
         start, end = parse_time(v["start"]), parse_time(v["end"])
         if not start:
             raise ValueError("start time looks like 14:30")
-        if not end:
-            raise ValueError("end time looks like 15:30")
+        if v["end"].strip().lower() in ("", "n/a", "na", "-", "?"):
+            end = start  # no end time: ends the moment it starts
+        elif not end:
+            raise ValueError("end time looks like 15:30, or leave it empty for none")
         end_day = day + dt.timedelta(days=1) if end < start else day  # crosses midnight
-        if end == start:
-            end_day = day
         return opts + ["--timed", "--start", f"{day}T{start}", "--end", f"{end_day}T{end}"]
 
 
@@ -694,14 +698,16 @@ class App:
                 shown = value[-(vw - 2):] if width(value) > vw - 2 else value
                 self.put(y, vx, shown + "▏", "white", bold=True, bg=SEL_BG)
             else:
-                placeholder = {"start": "14:30", "end": "15:30", "location": "optional"}.get(name, "")
+                placeholder = {"start": "14:30", "end": "N/A (no end time)", "location": "optional"}.get(name, "")
                 self.put(y, vx, clip(value, vw) if value else placeholder,
                          "gray" if value else "dim")
         if f.error:
             self.put(top + bh - 3, left + 2, clip(f.error, bw - 4), "red", bold=True)
         elif f.event and f.event.recurring:
             self.put(top + bh - 3, left + 2, "repeating event: only this occurrence changes", "dim")
-        self.put(top + bh - 2, left + 2, clip("tab/↓ next  ↑ back  enter save  esc cancel", bw - 4), "dim")
+        hint = "empty = no end time  ·  ctrl+u clears" if cur == "end" else \
+            "tab/↓ next  ↑ back  enter save  esc cancel"
+        self.put(top + bh - 2, left + 2, clip(hint, bw - 4), "dim")
 
     def draw_help(self, h, w):
         lines = [
@@ -720,6 +726,7 @@ class App:
             ("", ""),
             ("in the form", "tab/↓ next field, ↑ back, space toggles all day,"),
             ("", "enter saves, esc cancels. Times: 9, 930, 9:30"),
+            ("", "leave Ends empty (ctrl+u) for no end time"),
         ]
         bw, bh = min(70, w - 2), min(len(lines) + 4, h - 2)
         top, left = max(0, (h - bh) // 2), max(0, (w - bw) // 2)

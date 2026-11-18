@@ -13,7 +13,8 @@
 //   calhelper delete <id> <occurrence-start>
 //
 // Times are local: "2026-11-18T14:30" for timed events, "2026-11-18" for
-// all-day ones (an all-day event's end is its last day, inclusive).
+// all-day ones (an all-day event's end is its last day, inclusive). A timed
+// event whose end equals its start has no end time (the UIs show only the start).
 // macOS asks once for calendar access, on behalf of the terminal app.
 
 import EventKit
@@ -206,7 +207,6 @@ case "add":
     e.startDate = parseDate(o["start"]!) ?? Date()
     e.endDate = e.startDate
     apply(o, to: e)
-    if !e.isAllDay && e.endDate == e.startDate { e.endDate = e.startDate.addingTimeInterval(3600) }
     do { try store.save(e, span: .thisEvent, commit: true) } catch { fail("\(error.localizedDescription)") }
     emit(json(e))
 

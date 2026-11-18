@@ -32,6 +32,7 @@
    tab  j/k           choose one of the day's events
    e / x              edit / delete it (asks y/n)
    form: tab next field, space all day, enter save, esc
+   form: leave Ends empty (or N/A) for no end time
    mouse              click day, double-click adds
    ?                  every calendar key
 

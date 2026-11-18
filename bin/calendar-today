@@ -141,8 +141,13 @@ class Pane:
                 end = dt.datetime.strptime(ev["end"], "%Y-%m-%dT%H:%M")
                 s_txt = start.strftime("%H:%M") if start.date() == d else "earlier"
                 e_txt = end.strftime("%H:%M") if end.date() == d else "later"
-                when = f"{s_txt}–{e_txt}"
-                state = "past" if end <= now else "now" if start <= now else "later"
+                if end == start:  # no end time
+                    when = s_txt
+                    state = "past" if start < now - dt.timedelta(minutes=1) else \
+                        "now" if start <= now else "later"
+                else:
+                    when = f"{s_txt}–{e_txt}"
+                    state = "past" if end <= now else "now" if start <= now else "later"
                 if state == "later" and next_up is None:
                     next_up = start
             time_color = {"past": "dim", "now": "green", "later": "white", "allday": "yellow"}[state]

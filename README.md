@@ -145,7 +145,7 @@ Tab 2 (`Option+2`) is a calendar for the Mac's Calendar app. It can't be closed;
 | `?` | Every key |
 | Mouse | Click a day to select it, double-click to add, scroll to page; click the view names at the top |
 
-**Adding or editing** opens a small form: Title, All day, Date, then Starts/Ends (timed) or Until (all-day, for events over several days), and Where. `Tab`/`↓` next field, `↑` back, `Space` toggles all day, `Enter` saves, `Esc` cancels, `Ctrl+u` clears a field. Times can be typed as `9`, `930`, `9:30` or `14.30`; an end time before the start means the next day. New events go to your default calendar. Read-only calendars (Birthdays, subscribed holidays) are shown but can't be edited. For a repeating event only that one occurrence changes.
+**Adding or editing** opens a small form: Title, All day, Date, then Starts/Ends (timed) or Until (all-day, for events over several days), and Where. `Tab`/`↓` next field, `↑` back, `Space` toggles all day, `Enter` saves, `Esc` cancels, `Ctrl+u` clears a field. Times can be typed as `9`, `930`, `9:30` or `14.30`; an end time before the start means the next day. Leave Ends empty (`Ctrl+u`) or type `N/A` when there's no end time: the event shows just its start time (`18:00`) here and on the iPhone. New events go to your default calendar. Read-only calendars (Birthdays, subscribed holidays) are shown but can't be edited. For a repeating event only that one occurrence changes.
 
 ### iPhone sync
 
