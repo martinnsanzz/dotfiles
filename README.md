@@ -53,7 +53,7 @@ Two more kinds of tab open on a project picker (`~` and the folders in `~/Projec
 └──────────────────┴──────────┘
 ```
 
-- `Option+c` opens a **claude** tab (above) for any folder in `~/Projects`. Claude gets most of the width; lazygit shows every change it makes as it happens (diffs, staging, commits) and the terminal is for running things. Both start in the project. Outside a git repo the lazygit pane is a plain shell.
+- `Option+c` opens a **claude** tab (above) for any folder in `~/Projects`. Claude gets most of the width; lazygit shows every change it makes as it happens (diffs, staging, commits) and the terminal is for running things. Both start in the project. Outside a git repo the lazygit pane is a plain shell. Picking `~` gives a tab with just Claude, full width, for chatting and personal skills; `Option+e` still opens the file tree there.
 - `Option+d` opens a **developer** tab, for working on Codam projects: just nvim, full screen, opened on that project (`nvim .`). The nvim config brings its own file tree and terminal, so the tab needs nothing else.
 
 ```
@@ -97,7 +97,7 @@ git clone git@github.com:martinnsanzz/dotfiles.git ~/Projects/Claude/dotfiles
 
 1. `ghostty/config` sets `command = .../workspace`, so every Ghostty window runs that script instead of a plain shell. `macos-option-as-alt` makes the Option key work for tmux shortcuts, and `background-opacity` makes the window see-through. `maximize` and `window-save-state = never` make every window open maximized, including the one at login (otherwise macOS can "restore" zero windows and Ghostty shows nothing).
 2. `bin/workspace` creates the tmux session `main` with the home and calendar tabs. If `main` already exists, it reattaches instead. That's why closing Ghostty loses nothing. It marks both with the tmux option `@locked`: `Option+x`/`Option+w` in `tmux.conf` refuse to close a locked tab (or its last pane), and a pane whose program exits there is restarted instead of closing.
-3. `bin/dev claude [folder]` builds a claude/lazygit/terminal tab, and `bin/dev developer [folder]` opens a tab running `nvim .` in the folder. With `--pick` it first shows an fzf list of `~` and the folders in `~/Projects`.
+3. `bin/dev claude [folder]` builds a claude/lazygit/terminal tab (just claude in `~`), and `bin/dev developer [folder]` opens a tab running `nvim .` in the folder. With `--pick` it first shows an fzf list of `~` and the folders in `~/Projects`.
 4. `bin/home-art` plays looping ASCII animations across the bottom of the home tab, with the main shortcuts boxed in its top-right corner. It's Python (curses, standard library only), using the `python3` that comes with the Xcode command line tools.
 5. `bin/sysinfo` and `bin/procs` fill the top-left of home. Both are Python curses like `home-art`. sysinfo reads CPU ticks straight from the kernel, procs reads `ps` and `lsappinfo` every 2 seconds. `btop/btop.conf` is kept for running btop by hand.
 6. yazi's `open-nvim` plugin (`yazi/plugins/`, bound in `yazi/keymap.toml` and `yazi/init.lua`) opens files with `bin/yazi-nvim`, which swaps nvim into the tree's pane right away; quitting nvim brings the tree back. (yazi's built-in way of running an editor in its pane takes about 5 seconds to start.) The `Option+e` popup runs yazi through `bin/tree-popup`, which sets `YAZI_POPUP`: there Enter makes yazi hand back the chosen path and the popup opens it in nvim, and `q` (the `quit-popup` plugin) closes the popup through tmux. Both skip the same ~5 second wait yazi takes to give the terminal back.

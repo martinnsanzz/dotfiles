@@ -11,7 +11,9 @@
 #   │                  │(project) │     │                              │
 #   └──────────────────┴──────────┘     └──────────────────────────────┘
 #
-# The file tree is a popup (Option+e, bin/tree-popup) rather than a pane.
+# In ~ the claude tab is just claude, full width: home is for chatting and
+# personal skills, not a project. The file tree is a popup (Option+e,
+# bin/tree-popup) rather than a pane.
 #
 # Usage: dev claude|developer [dir]   open the tab in dir (default: current folder)
 #        dev claude|developer --pick  choose a folder with fzf first
@@ -125,7 +127,10 @@ start_main() {
 	fi
 }
 
-if [ "$kind" = claude ]; then
+if [ "$kind" = claude ] && [ "$dir" = "$HOME" ]; then
+	# Home isn't a project: no lazygit or terminal, claude gets the whole tab.
+	start_main claude
+elif [ "$kind" = claude ]; then
 	# lazygit shows what claude changes; outside a git repo it's just a shell.
 	git_pane=$(tmux split-window -h -l 35% -t "$main" -c "$dir" -P -F '#{pane_id}')
 	tmux split-window -v -l 40% -t "$git_pane" -c "$dir"
