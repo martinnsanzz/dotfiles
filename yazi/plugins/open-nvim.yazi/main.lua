@@ -36,6 +36,12 @@ return {
 		end
 		last_open = now
 
+		-- In the Option+e popup (bin/tree-popup), yazi writes the path to its
+		-- chooser file and quits; the popup then runs nvim itself.
+		if os.getenv("YAZI_POPUP") then
+			return ya.emit("open", {})
+		end
+
 		local path = ya.quote(tostring(h.url))
 		if os.getenv("TMUX") then
 			ya.emit("shell", { "yazi-nvim " .. path, orphan = true })

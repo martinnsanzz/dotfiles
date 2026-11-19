@@ -4,6 +4,7 @@
    Option+1..9        go to tab 1..9
    Option+c           new claude tab (pick a project)
    Option+d           new developer tab (pick a project)
+   Option+e           file tree popup (yazi), current folder
                       enter open, → into folder, ← back
    Option+t           new shell tab
    Option+r           rename tab
@@ -55,9 +56,10 @@
    k                  hide / show the shortcuts box
    q                  quit to shell (type home-art to restart)
 
- YAZI (file tree)
+ YAZI (file tree, Option+e)
    j/k  h/l           down/up, parent/enter folder
-   Enter              open file in nvim
+   Enter              open file in nvim (in the popup)
+   q                  close the tree
    (hover)            preview the file in the right column
    a  r  d            create, rename, trash
    Space  y  x  p     select, copy, cut, paste

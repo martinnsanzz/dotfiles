@@ -44,15 +44,16 @@ Two more kinds of tab open on a project picker (`~` and the folders in `~/Projec
 
 ```
  3 claude:dotfiles
-┌──────────────┬──────────────┐
-│              │  yazi tree   │
-│   claude     │ (Enter→nvim) │
-│              ├──────────────┤
-│              │   terminal   │
-└──────────────┴──────────────┘
+┌──────────────────┬──────────┐
+│                  │ lazygit  │
+│   claude         │ (what    │
+│                  │ changed) │
+│                  ├──────────┤
+│                  │ terminal │
+└──────────────────┴──────────┘
 ```
 
-- `Option+c` opens a **claude** tab (above) for any folder in `~/Projects`.
+- `Option+c` opens a **claude** tab (above) for any folder in `~/Projects`. Claude gets most of the width; lazygit shows every change it makes as it happens (diffs, staging, commits) and the terminal is for running things. Both start in the project. Outside a git repo the lazygit pane is a plain shell.
 - `Option+d` opens a **developer** tab, for working on Codam projects: just nvim, full screen, opened on that project (`nvim .`). The nvim config brings its own file tree and terminal, so the tab needs nothing else.
 
 ```
@@ -64,7 +65,7 @@ Two more kinds of tab open on a project picker (`~` and the folders in `~/Projec
 └──────────────────────────────┘
 ```
 
-In a claude tab the tree previews the hovered file in its own right-hand column.
+`Option+e` opens a **file tree** (yazi) in a popup over any tab, in the folder of the pane you're in. Hovering a file previews it; Enter opens it in nvim in the popup, and quitting nvim (or `q` in the tree) closes the popup. To point Claude at a file, type `@` and its name in the claude pane.
 
 ## Install
 
@@ -81,7 +82,8 @@ git clone git@github.com:martinnsanzz/dotfiles.git ~/Projects/Claude/dotfiles
 |---|---|---|
 | [Ghostty](https://ghostty.org) | The terminal app. | It's the window. On launch it runs `bin/workspace`. |
 | [tmux](https://github.com/tmux/tmux) | A terminal multiplexer. | Tabs (tmux "windows") and panes. The session keeps running after Ghostty closes. |
-| [yazi](https://yazi-rs.github.io) | A terminal file manager. | The file tree in claude tabs. Hovering a file previews it; Enter or a click opens it in nvim. |
+| [yazi](https://yazi-rs.github.io) | A terminal file manager. | The file tree popup (`Option+e`, `bin/tree-popup`). Hovering a file previews it; Enter or a click opens it in nvim. |
+| [lazygit](https://github.com/jesseduffield/lazygit) | A git interface for the terminal. | The top-right pane of each claude tab, to review what Claude changed. Also used inside nvim. |
 | [Neovim](https://neovim.io) | The text editor. | Set up like VS Code, in its own repo: [nvim-config](https://github.com/martinnsanzz/nvim-config). It fills the whole developer tab and opens files from the yazi tree. |
 | [Claude Code](https://claude.com/claude-code) | AI coding assistant. | The left pane of each claude tab. |
 | [btop](https://github.com/aristocratos/btop) | A live system monitor. | Not on the home tab any more; run `btop` for the full view (plain gray/blue theme). |
@@ -95,10 +97,10 @@ git clone git@github.com:martinnsanzz/dotfiles.git ~/Projects/Claude/dotfiles
 
 1. `ghostty/config` sets `command = .../workspace`, so every Ghostty window runs that script instead of a plain shell. `macos-option-as-alt` makes the Option key work for tmux shortcuts, and `background-opacity` makes the window see-through. `maximize` and `window-save-state = never` make every window open maximized, including the one at login (otherwise macOS can "restore" zero windows and Ghostty shows nothing).
 2. `bin/workspace` creates the tmux session `main` with the home and calendar tabs. If `main` already exists, it reattaches instead. That's why closing Ghostty loses nothing. It marks both with the tmux option `@locked`: `Option+x`/`Option+w` in `tmux.conf` refuse to close a locked tab (or its last pane), and a pane whose program exits there is restarted instead of closing.
-3. `bin/dev claude [folder]` builds a claude/tree/terminal tab, and `bin/dev developer [folder]` opens a tab running `nvim .` in the folder. With `--pick` it first shows an fzf list of `~` and the folders in `~/Projects`.
+3. `bin/dev claude [folder]` builds a claude/lazygit/terminal tab, and `bin/dev developer [folder]` opens a tab running `nvim .` in the folder. With `--pick` it first shows an fzf list of `~` and the folders in `~/Projects`.
 4. `bin/home-art` plays looping ASCII animations across the bottom of the home tab, with the main shortcuts boxed in its top-right corner. It's Python (curses, standard library only), using the `python3` that comes with the Xcode command line tools.
 5. `bin/sysinfo` and `bin/procs` fill the top-left of home. Both are Python curses like `home-art`. sysinfo reads CPU ticks straight from the kernel, procs reads `ps` and `lsappinfo` every 2 seconds. `btop/btop.conf` is kept for running btop by hand.
-6. yazi's `open-nvim` plugin (`yazi/plugins/`, bound in `yazi/keymap.toml` and `yazi/init.lua`) opens files with `bin/yazi-nvim`, which swaps nvim into the tree's pane right away; quitting nvim brings the tree back. (yazi's built-in way of running an editor in its pane takes about 5 seconds to start.)
+6. yazi's `open-nvim` plugin (`yazi/plugins/`, bound in `yazi/keymap.toml` and `yazi/init.lua`) opens files with `bin/yazi-nvim`, which swaps nvim into the tree's pane right away; quitting nvim brings the tree back. (yazi's built-in way of running an editor in its pane takes about 5 seconds to start.) The `Option+e` popup runs yazi through `bin/tree-popup`, which sets `YAZI_POPUP`: there Enter makes yazi hand back the chosen path and the popup opens it in nvim, and `q` (the `quit-popup` plugin) closes the popup through tmux. Both skip the same ~5 second wait yazi takes to give the terminal back.
 7. `bin/calendar` and `bin/calendar-today` (Python curses) get events from `calhelper`, a small Swift program using EventKit that prints JSON (`calhelper list 2026-11-01 2026-11-30`, `add`, `update`, `delete`). They re-read every 30 seconds, and the today pane also reloads the moment the calendar changes something (it watches `~/.cache/dotfiles-calendar.stamp`).
 8. `bin/todo` (Python curses) keeps the to-do list in `~/.local/share/todo.txt`. It checks the file every second, so edits made by hand show up right away, and on the first check after midnight it deletes the to-dos done before today.
 9. `bin/flash` shows a short message in a centered tmux popup. `Ctrl+b r` uses it to confirm the tmux config reloaded. Ghostty's `Cmd+Shift+R` reloads Ghostty and then types a private key code that tmux binds (`User0`) to the same popup.
@@ -109,7 +111,7 @@ git clone git@github.com:martinnsanzz/dotfiles.git ~/Projects/Claude/dotfiles
 |---|---|
 | `ghostty/config` | `~/.config/ghostty/config` |
 | `tmux/tmux.conf`, `tmux/keys.txt` | `~/.config/tmux/` |
-| `yazi/yazi.toml`, `keymap.toml`, `init.lua`, `plugins/open-nvim.yazi` | `~/.config/yazi/` |
+| `yazi/yazi.toml`, `keymap.toml`, `init.lua`, `plugins/open-nvim.yazi`, `plugins/quit-popup.yazi` | `~/.config/yazi/` |
 | `btop/btop.conf`, `btop/themes/plain.theme` | `~/.config/btop/` |
 | [nvim-config](https://github.com/martinnsanzz/nvim-config) (separate repo, cloned next to this one) | `~/.config/nvim` |
 | `bin/*` | `~/.local/bin/` |
@@ -263,6 +265,7 @@ The same list opens with `Option+?` (in `tmux/keys.txt`). Option is the ⌥ key.
 | `Option+1..9` | Go to tab 1..9 |
 | `Option+c` | New claude tab (pick a project) |
 | `Option+d` | New developer tab (pick a project) |
+| `Option+e` | File tree popup (yazi) in the current pane's folder |
 | `Option+t` | New shell tab |
 | `Option+r` | Rename tab |
 | `Option+x` / `Option+Shift+w` | Close tab (not home or calendar) |
@@ -294,7 +297,7 @@ The mouse still works as a fallback.
 | `d` | Move to trash |
 | `.` | Show/hide hidden files |
 | `/` | Search in the folder |
-| `q` | Quit (type `yazi` to reopen) |
+| `q` | Quit (in the popup: close it) |
 
 ### nvim
 

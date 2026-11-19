@@ -8,3 +8,9 @@ desc = "Enter folder or open file in nvim"
 on   = "l"
 run  = "plugin open-nvim"
 desc = "Enter folder or open file in nvim"
+
+# q in the Option+e popup closes it instantly (see plugins/quit-popup.yazi)
+[[mgr.prepend_keymap]]
+on   = "q"
+run  = "plugin quit-popup"
+desc = "Quit (closes the file popup at once)"

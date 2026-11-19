@@ -121,6 +121,7 @@ link_configs() {
 	link yazi/keymap.toml "$HOME/.config/yazi/keymap.toml"
 	link yazi/init.lua    "$HOME/.config/yazi/init.lua"
 	link yazi/plugins/open-nvim.yazi "$HOME/.config/yazi/plugins/open-nvim.yazi"
+	link yazi/plugins/quit-popup.yazi "$HOME/.config/yazi/plugins/quit-popup.yazi"
 	link btop/btop.conf   "$HOME/.config/btop/btop.conf"
 	link btop/themes/plain.theme "$HOME/.config/btop/themes/plain.theme"
 	link_nvim

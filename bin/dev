@@ -2,14 +2,16 @@
 # Opens a claude or developer tab in tmux:
 #
 #   claude (Option+c)                   developer (Option+d)
-#   ┌──────────────┬──────────────┐     ┌──────────────────────────────┐
-#   │              │  yazi tree   │     │                              │
-#   │   claude     │ (Enter→nvim) │     │  nvim . (project), the whole │
-#   │  (project)   │     (~)      │     │  tab: its own file tree and  │
-#   │              ├──────────────┤     │  terminal live inside nvim   │
-#   │              │ fish terminal│     │                              │
-#   │              │     (~)      │     │                              │
-#   └──────────────┴──────────────┘     └──────────────────────────────┘
+#   ┌──────────────────┬──────────┐     ┌──────────────────────────────┐
+#   │                  │ lazygit  │     │                              │
+#   │   claude         │ (what    │     │  nvim . (project), the whole │
+#   │  (project)       │ changed) │     │  tab: its own file tree and  │
+#   │                  ├──────────┤     │  terminal live inside nvim   │
+#   │                  │ terminal │     │                              │
+#   │                  │(project) │     │                              │
+#   └──────────────────┴──────────┘     └──────────────────────────────┘
+#
+# The file tree is a popup (Option+e, bin/tree-popup) rather than a pane.
 #
 # Usage: dev claude|developer [dir]   open the tab in dir (default: current folder)
 #        dev claude|developer --pick  choose a folder with fzf first
@@ -124,11 +126,13 @@ start_main() {
 }
 
 if [ "$kind" = claude ]; then
-	# Only claude works in the chosen project; yazi and the terminal start in home.
-	tree_pane=$(tmux split-window -h -l 50% -t "$main" -c "$HOME" -P -F '#{pane_id}')
-	tmux split-window -v -l 40% -t "$tree_pane" -c "$HOME"
+	# lazygit shows what claude changes; outside a git repo it's just a shell.
+	git_pane=$(tmux split-window -h -l 35% -t "$main" -c "$dir" -P -F '#{pane_id}')
+	tmux split-window -v -l 40% -t "$git_pane" -c "$dir"
 	start_main claude
-	tmux send-keys -t "$tree_pane" 'yazi' Enter
+	if git -C "$dir" rev-parse --git-dir >/dev/null 2>&1; then
+		tmux send-keys -t "$git_pane" 'lazygit' Enter
+	fi
 	tmux select-pane -t "$main"
 else
 	# nvim's config opens its file tree and terminal for `nvim .` (nvim-config).
