@@ -93,7 +93,7 @@ git clone git@github.com:martinnsanzz/dotfiles.git ~/Projects/Claude/dotfiles
 
 ### How it fits together
 
-1. `ghostty/config` sets `command = .../workspace`, so every Ghostty window runs that script instead of a plain shell. `macos-option-as-alt` makes the Option key work for tmux shortcuts, and `background-opacity` makes the window see-through.
+1. `ghostty/config` sets `command = .../workspace`, so every Ghostty window runs that script instead of a plain shell. `macos-option-as-alt` makes the Option key work for tmux shortcuts, and `background-opacity` makes the window see-through. `maximize` and `window-save-state = never` make every window open maximized, including the one at login (otherwise macOS can "restore" zero windows and Ghostty shows nothing).
 2. `bin/workspace` creates the tmux session `main` with the home and calendar tabs. If `main` already exists, it reattaches instead. That's why closing Ghostty loses nothing. It marks both with the tmux option `@locked`: `Option+x`/`Option+w` in `tmux.conf` refuse to close a locked tab (or its last pane), and a pane whose program exits there is restarted instead of closing.
 3. `bin/dev claude [folder]` builds a claude/tree/terminal tab, and `bin/dev developer [folder]` opens a tab running `nvim .` in the folder. With `--pick` it first shows an fzf list of `~` and the folders in `~/Projects`.
 4. `bin/home-art` plays looping ASCII animations across the bottom of the home tab, with the main shortcuts boxed in its top-right corner. It's Python (curses, standard library only), using the `python3` that comes with the Xcode command line tools.

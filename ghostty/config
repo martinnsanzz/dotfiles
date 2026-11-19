@@ -2,6 +2,13 @@
 # Every new window starts (or reattaches to) the tmux workspace.
 command = shell:$HOME/.local/bin/workspace
 
+# Window
+# Always open a fresh window (tmux keeps the sessions), even at login when
+# macOS would otherwise "restore" zero windows and show nothing
+window-save-state = never
+# New windows fill the screen (not macOS fullscreen)
+maximize = true
+
 # Appearance
 theme = Catppuccin Mocha
 font-size = 14
