@@ -1,5 +1,5 @@
 // raise-windows: brings windows that programs started from a terminal open
-// (pygame, tkinter, matplotlib, `make run`, F5 in nvim) to the front.
+// (pygame, tkinter, matplotlib, `make run`, F5 in VS Code) to the front.
 //
 // Why it's needed: macOS only lets the app you're using hand focus to another
 // one. A python3 started from Ghostty opens its window, asks for focus, and
@@ -9,7 +9,7 @@
 // What it does: macOS posts a notice every time an app starts. A program that
 // opens a window becomes an "app" at that moment (python3 shows up in the Dock
 // as "Python"). For each new app, this checks whether it was started from a
-// terminal (one of its parent processes is tmux, nvim, a shell, Ghostty...),
+// terminal (one of its parent processes is tmux, vim, a shell, Ghostty...),
 // waits for its first window, and then activates it with all its windows.
 // Apps opened from the Dock, Spotlight or Finder are started by launchd, not a
 // terminal, so they're left alone.
@@ -26,7 +26,7 @@ import Darwin
 
 // Process names that mean "started from a terminal".
 let terminalParents: Set<String> = [
-    "ghostty", "tmux", "nvim", "vim", "fish", "zsh", "bash", "sh", "make",
+    "ghostty", "tmux", "vim", "fish", "zsh", "bash", "sh", "make",
     "Terminal", "iTerm2",
 ]
 let windowTimeout = 30.0  // seconds to wait for the first window

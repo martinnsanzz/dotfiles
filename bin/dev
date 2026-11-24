@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
-# Opens a claude or developer tab in tmux:
+# Opens a claude tab in tmux, or a project in VS Code:
 #
 #   claude (Option+c)                   developer (Option+d)
-#   ┌──────────────────┬──────────┐     ┌──────────────────────────────┐
-#   │                  │ lazygit  │     │                              │
-#   │   claude         │ (what    │     │  nvim . (project), the whole │
-#   │  (project)       │ changed) │     │  tab: its own file tree and  │
-#   │                  ├──────────┤     │  terminal live inside nvim   │
-#   │                  │ terminal │     │                              │
-#   │                  │(project) │     │                              │
-#   └──────────────────┴──────────┘     └──────────────────────────────┘
+#   ┌──────────────────┬──────────┐     VS Code opens on the project in
+#   │                  │ lazygit  │     its own window; no tmux tab.
+#   │   claude         │ (what    │
+#   │  (project)       │ changed) │
+#   │                  ├──────────┤
+#   │                  │ terminal │
+#   │                  │(project) │
+#   └──────────────────┴──────────┘
 #
 # In ~ the claude tab is just claude, full width: home is for chatting and
 # personal skills, not a project. The file tree is a popup (Option+e,
 # bin/tree-popup) rather than a pane.
 #
-# Usage: dev claude|developer [dir]   open the tab in dir (default: current folder)
+# Usage: dev claude|developer [dir]   open dir (default: current folder)
 #        dev claude|developer --pick  choose a folder with fzf first
 #        ... --pick --here   pick, then build the tab around the current pane
 # DEV_SESSION=name adds the tab to that session instead of the current one.
@@ -103,11 +103,16 @@ if [ -n "$pick" ]; then
 fi
 dir=${dir:-$PWD}
 
+if [ "$kind" = developer ]; then
+	open -a "Visual Studio Code" "$dir"
+	exit
+fi
+
 # Tab name: claude:<project>, or just claude for home.
 name=$kind
 [ "$dir" != "$HOME" ] && name="$kind:$(basename "$dir")"
 
-# The first pane: claude in a claude tab, nvim in a developer tab.
+# The first pane, where claude runs.
 if [ -n "$here" ]; then
 	main=$TMUX_PANE
 	tmux rename-window -t "$main" "$name"
@@ -130,7 +135,7 @@ start_main() {
 if [ "$kind" = claude ] && [ "$dir" = "$HOME" ]; then
 	# Home isn't a project: no lazygit or terminal, claude gets the whole tab.
 	start_main claude
-elif [ "$kind" = claude ]; then
+else
 	# lazygit shows what claude changes; outside a git repo it's just a shell.
 	git_pane=$(tmux split-window -h -l 35% -t "$main" -c "$dir" -P -F '#{pane_id}')
 	tmux split-window -v -l 40% -t "$git_pane" -c "$dir"
@@ -139,7 +144,4 @@ elif [ "$kind" = claude ]; then
 		tmux send-keys -t "$git_pane" 'lazygit' Enter
 	fi
 	tmux select-pane -t "$main"
-else
-	# nvim's config opens its file tree and terminal for `nvim .` (nvim-config).
-	start_main 'nvim .'
 fi

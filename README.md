@@ -40,7 +40,7 @@ My keyboard-driven terminal setup for macOS. Opening Ghostty gives this workspac
 
 The calendar and today panes read and write the Mac's own Calendar, which syncs with iCloud, so the iPhone sees what you add here and the other way round.
 
-Two more kinds of tab open on a project picker (`~` and the folders in `~/Projects`). Each tab is named after its project, like `claude:dotfiles` or `developer:libasm`:
+Two shortcuts open a project picker (`~` and the folders in `~/Projects`). `Option+c` opens a tab named after the project, like `claude:dotfiles`:
 
 ```
  3 claude:dotfiles
@@ -54,18 +54,9 @@ Two more kinds of tab open on a project picker (`~` and the folders in `~/Projec
 ```
 
 - `Option+c` opens a **claude** tab (above) for any folder in `~/Projects`. Claude gets most of the width; lazygit shows every change it makes as it happens (diffs, staging, commits) and the terminal is for running things. Both start in the project. Outside a git repo the lazygit pane is a plain shell. Picking `~` gives a tab with just Claude, full width, for chatting and personal skills; `Option+e` still opens the file tree there.
-- `Option+d` opens a **developer** tab, for working on Codam projects: just nvim, full screen, opened on that project (`nvim .`). The nvim config brings its own file tree and terminal, so the tab needs nothing else.
+- `Option+d` is **developer** mode, for working on Codam projects: pick a project and it opens in VS Code, in its own window. No tmux tab is made.
 
-```
- 4 developer:libasm
-┌──────────────────────────────┐
-│                              │
-│      nvim . (the project)    │
-│                              │
-└──────────────────────────────┘
-```
-
-`Option+e` opens a **file tree** (yazi) in a popup over any tab, in the folder of the pane you're in. Hovering a file previews it; Enter opens it in nvim in the popup, and quitting nvim (or `q` in the tree) closes the popup. To point Claude at a file, type `@` and its name in the claude pane.
+`Option+e` opens a **file tree** (yazi) in a popup over any tab, in the folder of the pane you're in. Hovering a file previews it; Enter opens it in vim in the popup, and quitting vim (or `q` in the tree) closes the popup. To point Claude at a file, type `@` and its name in the claude pane.
 
 ## Install
 
@@ -74,7 +65,7 @@ git clone git@github.com:martinnsanzz/dotfiles.git ~/Projects/Claude/dotfiles
 ~/Projects/Claude/dotfiles/install.sh
 ```
 
-`install.sh` also clones [nvim-config](https://github.com/martinnsanzz/nvim-config) next to this repo (`~/Projects/Claude/nvim-config`) if it isn't there yet. Then open Ghostty (`open -a Ghostty`). `./install.sh links` only re-creates the symlinks, compiles `calhelper` and `raise-windows` (when their source changed) and makes sure `raise-windows` is running; `./install.sh tools` only installs the tools. Any config that already exists is moved to `<name>.bak-<timestamp>` before it gets replaced.
+Then open Ghostty (`open -a Ghostty`). `./install.sh links` only re-creates the symlinks, compiles `calhelper` and `raise-windows` (when their source changed) and makes sure `raise-windows` is running; `./install.sh tools` only installs the tools. Any config that already exists is moved to `<name>.bak-<timestamp>` before it gets replaced.
 
 ## The tools
 
@@ -82,13 +73,14 @@ git clone git@github.com:martinnsanzz/dotfiles.git ~/Projects/Claude/dotfiles
 |---|---|---|
 | [Ghostty](https://ghostty.org) | The terminal app. | It's the window. On launch it runs `bin/workspace`. |
 | [tmux](https://github.com/tmux/tmux) | A terminal multiplexer. | Tabs (tmux "windows") and panes. The session keeps running after Ghostty closes. |
-| [yazi](https://yazi-rs.github.io) | A terminal file manager. | The file tree popup (`Option+e`, `bin/tree-popup`). Hovering a file previews it; Enter or a click opens it in nvim. |
-| [lazygit](https://github.com/jesseduffield/lazygit) | A git interface for the terminal. | The top-right pane of each claude tab, to review what Claude changed. Also used inside nvim. |
-| [Neovim](https://neovim.io) | The text editor. | Set up like VS Code, in its own repo: [nvim-config](https://github.com/martinnsanzz/nvim-config). It fills the whole developer tab and opens files from the yazi tree. |
+| [yazi](https://yazi-rs.github.io) | A terminal file manager. | The file tree popup (`Option+e`, `bin/tree-popup`). Hovering a file previews it; Enter or a click opens it in vim. |
+| [lazygit](https://github.com/jesseduffield/lazygit) | A git interface for the terminal. | The top-right pane of each claude tab, to review what Claude changed. |
+| [VS Code](https://code.visualstudio.com) | The code editor. | Developer mode (`Option+d`) opens the picked project in it. |
+| vim | The terminal editor that comes with macOS. | Opens files from the yazi tree. |
 | [Claude Code](https://claude.com/claude-code) | AI coding assistant. | The left pane of each claude tab. |
 | [btop](https://github.com/aristocratos/btop) | A live system monitor. | Not on the home tab any more; run `btop` for the full view (plain gray/blue theme). |
 | [fzf](https://github.com/junegunn/fzf) | A fuzzy finder. | The project picker behind `Option+c` and `Option+d`. |
-| `raise-windows` | A small Swift program running in the background. | Brings windows opened from a terminal (pygame, tkinter, `make run`, F5 in nvim) in front of Ghostty. See [Windows from the terminal](#windows-from-the-terminal). |
+| `raise-windows` | A small Swift program running in the background. | Brings windows opened from a terminal (pygame, tkinter, `make run`, F5 in VS Code) in front of Ghostty. See [Windows from the terminal](#windows-from-the-terminal). |
 | EventKit (`calhelper`) | Apple's calendar framework. | `calendar/calhelper.swift`, compiled by `install.sh`, is the calendar tab's link to the Mac's Calendar and through it iCloud and the iPhone. |
 | fish | The shell. | Every terminal pane. |
 | Homebrew | The macOS package manager. | `install.sh` uses it to install everything. |
@@ -97,10 +89,10 @@ git clone git@github.com:martinnsanzz/dotfiles.git ~/Projects/Claude/dotfiles
 
 1. `ghostty/config` sets `command = .../workspace`, so every Ghostty window runs that script instead of a plain shell. `macos-option-as-alt` makes the Option key work for tmux shortcuts, and `background-opacity` makes the window see-through. `maximize` and `window-save-state = never` make every window open maximized, including the one at login (otherwise macOS can "restore" zero windows and Ghostty shows nothing).
 2. `bin/workspace` creates the tmux session `main` with the home and calendar tabs. If `main` already exists, it reattaches instead. That's why closing Ghostty loses nothing. It marks both with the tmux option `@locked`: `Option+x`/`Option+w` in `tmux.conf` refuse to close a locked tab (or its last pane), and a pane whose program exits there is restarted instead of closing.
-3. `bin/dev claude [folder]` builds a claude/lazygit/terminal tab (just claude in `~`), and `bin/dev developer [folder]` opens a tab running `nvim .` in the folder. With `--pick` it first shows an fzf list of `~` and the folders in `~/Projects`.
+3. `bin/dev claude [folder]` builds a claude/lazygit/terminal tab (just claude in `~`), and `bin/dev developer [folder]` opens the folder in VS Code. With `--pick` it first shows an fzf list of `~` and the folders in `~/Projects`.
 4. `bin/home-art` plays looping ASCII animations across the bottom of the home tab, with the main shortcuts boxed in its top-right corner. It's Python (curses, standard library only), using the `python3` that comes with the Xcode command line tools.
 5. `bin/sysinfo` and `bin/procs` fill the top-left of home. Both are Python curses like `home-art`. sysinfo reads CPU ticks straight from the kernel, procs reads `ps` and `lsappinfo` every 2 seconds. `btop/btop.conf` is kept for running btop by hand.
-6. yazi's `open-nvim` plugin (`yazi/plugins/`, bound in `yazi/keymap.toml` and `yazi/init.lua`) opens files with `bin/yazi-nvim`, which swaps nvim into the tree's pane right away; quitting nvim brings the tree back. (yazi's built-in way of running an editor in its pane takes about 5 seconds to start.) The `Option+e` popup runs yazi through `bin/tree-popup`, which sets `YAZI_POPUP`: there Enter makes yazi hand back the chosen path and the popup opens it in nvim, and `q` (the `quit-popup` plugin) closes the popup through tmux. Both skip the same ~5 second wait yazi takes to give the terminal back.
+6. yazi's `open-vim` plugin (`yazi/plugins/`, bound in `yazi/keymap.toml` and `yazi/init.lua`) opens files with `bin/yazi-vim`, which swaps vim into the tree's pane right away; quitting vim brings the tree back. (yazi's built-in way of running an editor in its pane takes about 5 seconds to start.) The `Option+e` popup runs yazi through `bin/tree-popup`, which sets `YAZI_POPUP`: there Enter makes yazi hand back the chosen path and the popup opens it in vim, and `q` (the `quit-popup` plugin) closes the popup through tmux. Both skip the same ~5 second wait yazi takes to give the terminal back.
 7. `bin/calendar` and `bin/calendar-today` (Python curses) get events from `calhelper`, a small Swift program using EventKit that prints JSON (`calhelper list 2026-11-01 2026-11-30`, `add`, `update`, `delete`). They re-read every 30 seconds, and the today pane also reloads the moment the calendar changes something (it watches `~/.cache/dotfiles-calendar.stamp`).
 8. `bin/todo` (Python curses) keeps the to-do list in `~/.local/share/todo.txt`. It checks the file every second, so edits made by hand show up right away, and on the first check after midnight it deletes the to-dos done before today.
 9. `bin/flash` shows a short message in a centered tmux popup. `Ctrl+b r` uses it to confirm the tmux config reloaded. Ghostty's `Cmd+Shift+R` reloads Ghostty and then types a private key code that tmux binds (`User0`) to the same popup.
@@ -111,9 +103,8 @@ git clone git@github.com:martinnsanzz/dotfiles.git ~/Projects/Claude/dotfiles
 |---|---|
 | `ghostty/config` | `~/.config/ghostty/config` |
 | `tmux/tmux.conf`, `tmux/keys.txt` | `~/.config/tmux/` |
-| `yazi/yazi.toml`, `keymap.toml`, `init.lua`, `plugins/open-nvim.yazi`, `plugins/quit-popup.yazi` | `~/.config/yazi/` |
+| `yazi/yazi.toml`, `keymap.toml`, `init.lua`, `plugins/open-vim.yazi`, `plugins/quit-popup.yazi` | `~/.config/yazi/` |
 | `btop/btop.conf`, `btop/themes/plain.theme` | `~/.config/btop/` |
-| [nvim-config](https://github.com/martinnsanzz/nvim-config) (separate repo, cloned next to this one) | `~/.config/nvim` |
 | `bin/*` | `~/.local/bin/` |
 | `calendar/calhelper.swift` (compiled, not linked) | `~/.local/bin/calhelper` |
 | `raise-windows/raise-windows.swift` (compiled, not linked) | `~/.local/bin/raise-windows`, started by `~/Library/LaunchAgents/com.dotfiles.raise-windows.plist` |
@@ -208,17 +199,17 @@ It stays on this Mac: unlike calendar events, to-dos don't sync to the iPhone.
 
 ## Windows from the terminal
 
-On its own, macOS opens a window from a program you start in the terminal (a pygame game with `make run`, `python3 file.py`, F5 in nvim) *behind* Ghostty. Only the app you're using is allowed to hand focus to another app, and Ghostty never does, so the new window's request to come forward is refused.
+On its own, macOS opens a window from a program you start in the terminal (a pygame game with `make run`, `python3 file.py`, F5 in VS Code) *behind* Ghostty. Only the app you're using is allowed to hand focus to another app, and Ghostty never does, so the new window's request to come forward is refused.
 
 `raise-windows` fixes that the way VS Code feels: the window opens in front, with focus, so you can play or type straight away. It runs in the background and:
 
 1. gets a notice from macOS each time an app starts (a Python program becomes an app, "Python" in the Dock, when it opens its first window);
-2. checks whether that app was started from a terminal, meaning one of its parent processes is tmux, nvim, make, a shell or Ghostty;
+2. checks whether that app was started from a terminal, meaning one of its parent processes is tmux, vim, make, a shell or Ghostty;
 3. if so, waits for its window (up to 30 seconds) and brings it to the front with all its windows.
 
-Apps you open from the Dock, Spotlight or Finder are started by macOS itself, not a terminal, so they're left alone. It works the same from a Ghostty tab, a tmux pane or nvim, because all three show up as parents. It needs no permissions and nothing extra installed: `install.sh` compiles it with the Xcode command line tools, like `calhelper`.
+Apps you open from the Dock, Spotlight or Finder are started by macOS itself, not a terminal, so they're left alone. It works the same from a Ghostty tab, a tmux pane or VS Code's terminal, because all three show up as parents. It needs no permissions and nothing extra installed: `install.sh` compiles it with the Xcode command line tools, like `calhelper`.
 
-**Try it:** run this from a Ghostty tab, a tmux pane, or open it in nvim and press F5:
+**Try it:** run this from a Ghostty tab, a tmux pane, or open it in VS Code and press F5:
 
 ```sh
 python3 ~/Projects/Claude/dotfiles/raise-windows/test-window.py
@@ -264,7 +255,7 @@ The same list opens with `Option+?` (in `tmux/keys.txt`). Option is the ⌥ key.
 |---|---|
 | `Option+1..9` | Go to tab 1..9 |
 | `Option+c` | New claude tab (pick a project) |
-| `Option+d` | New developer tab (pick a project) |
+| `Option+d` | Open a project in VS Code (pick one) |
 | `Option+e` | File tree popup (yazi) in the current pane's folder |
 | `Option+t` | New shell tab |
 | `Option+r` | Rename tab |
@@ -288,7 +279,7 @@ The mouse still works as a fallback.
 | Keys | Action |
 |---|---|
 | `j`/`k` | Move down/up |
-| `l` / `Enter` / click | Open folder / open file in nvim |
+| `l` / `Enter` / click | Open folder / open file in vim |
 | (hover) | Preview the file in yazi's right column |
 | `h` | Go up a folder |
 | `a` | Create a file (end the name with `/` to make a folder) |
@@ -299,27 +290,21 @@ The mouse still works as a fallback.
 | `/` | Search in the folder |
 | `q` | Quit (in the popup: close it) |
 
-### nvim
-
-`Option+n` opens the full nvim cheat sheet (`keys.txt` in the [nvim-config](https://github.com/martinnsanzz/nvim-config) repo); `Space ?` shows the same list inside nvim. The basics:
+### vim
 
 | Keys | Action |
 |---|---|
 | `i` / `Esc` | Start typing / back to normal mode |
-| `Ctrl+s` | Save |
-| `Ctrl+p` | Find a file |
-| `Space e` | File tree |
-| `F5` | Run this file |
-| `Space` (wait) | Shows everything that can follow |
+| `:w` / `:q` / `:wq` | Save / close / save and close |
+| `:q!` | Close without saving |
 
-Run `nvim +Tutor` in the terminal for a 30-minute interactive lesson.
+Run `vimtutor` in the terminal for a 30-minute interactive lesson.
 
 ### Other
 
 | Keys | Action |
 |---|---|
 | `Option+/` | tmux / Ghostty shortcuts |
-| `Option+n` | nvim shortcuts |
 | `Ctrl+b r` | Reload tmux config (a popup confirms it) |
 | `Ctrl+b d` | Detach (session keeps running) |
 | `Cmd+Shift+R` | Reload Ghostty config (a popup confirms it) |
@@ -331,6 +316,5 @@ tmux catches these Option shortcuts before the program in the pane sees them. Fo
 - **Start the layout fresh:** run `tmux kill-server`, then open a new Ghostty window.
 - **A window from the terminal still opens behind Ghostty:** check the background program runs with `launchctl print gui/$(id -u)/com.dotfiles.raise-windows | grep state` (it should say `running`); if not, run `./install.sh links`. Then run `raise-windows -v` as shown in [Windows from the terminal](#windows-from-the-terminal) to see whether it notices the app.
 - **Calendar says no access or shows no events:** see [iPhone sync](#iphone-sync). Run `calhelper calendars` in a Ghostty pane to list the calendars it can see.
-- **A pane's program exited:** the pane falls back to a shell. Type `claude`, `yazi`, `sysinfo`, `procs` or `home-art` to start it again. In a developer tab, quitting nvim leaves a shell in the project; type `nvim .` to reopen it.
+- **A pane's program exited:** the pane falls back to a shell. Type `claude`, `yazi`, `sysinfo`, `procs` or `home-art` to start it again.
 - **Ghostty opens a plain shell:** tmux isn't installed or isn't on PATH. Run `./install.sh tools`.
-- **nvim says a language server failed to install:** run `:Mason` to see why. If npm complains about root-owned files in `~/.npm`, run `sudo chown -R $(id -u):$(id -g) ~/.npm` once.

@@ -3,7 +3,7 @@
  TABS
    Option+1..9        go to tab 1..9
    Option+c           new claude tab (pick a project)
-   Option+d           new developer tab (pick a project)
+   Option+d           open a project in VS Code (pick one)
    Option+e           file tree popup (yazi), current folder
                       enter open, → into folder, ← back
    Option+t           new shell tab
@@ -58,22 +58,19 @@
 
  YAZI (file tree, Option+e)
    j/k  h/l           down/up, parent/enter folder
-   Enter              open file in nvim (in the popup)
+   Enter              open file in vim (in the popup)
    q                  close the tree
    (hover)            preview the file in the right column
    a  r  d            create, rename, trash
    Space  y  x  p     select, copy, cut, paste
    .                  show/hide hidden files
 
- NVIM
-   Option+n           every nvim shortcut
-   Space (in nvim)    shows what can follow
+ VIM
    i  Esc             type / stop typing
-   Ctrl+s  :q         save, close
+   :w  :q  :wq        save, close, save and close
 
  OTHER
    Option+/           this list
-   Option+n           nvim shortcuts
    Ctrl+b r           reload tmux config
    Ctrl+b d           detach (session keeps running)
    Cmd+Shift+r        reload Ghostty config

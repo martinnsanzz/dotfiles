@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Launched by Ghostty on every new window. Builds (or reattaches to) the
-# tmux session "main" with the home and calendar tabs. Claude and developer
-# tabs open on demand with Option+c / Option+d (see bin/dev).
+# tmux session "main" with the home and calendar tabs. Claude tabs open on
+# demand with Option+c, and Option+d opens a project in VS Code (see bin/dev).
 #
 #   1:home
 #   ┌─────────┬───────────┬──────────────┐

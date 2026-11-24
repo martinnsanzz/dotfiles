@@ -1,7 +1,7 @@
 --- @sync entry
--- Enter / click: folders open in place, files open in nvim straight away.
--- Inside tmux, bin/yazi-nvim swaps nvim into this pane: yazi's own way of running
--- nvim here (a blocking shell) stalls ~5s and queues every extra press.
+-- Enter / click: folders open in place, files open in vim straight away.
+-- Inside tmux, bin/yazi-vim swaps vim into this pane: yazi's own way of running
+-- vim here (a blocking shell) stalls ~5s and queues every extra press.
 
 local function is_text(mime)
 	return mime:find("^text/")
@@ -37,16 +37,16 @@ return {
 		last_open = now
 
 		-- In the Option+e popup (bin/tree-popup), yazi writes the path to its
-		-- chooser file and quits; the popup then runs nvim itself.
+		-- chooser file and quits; the popup then runs vim itself.
 		if os.getenv("YAZI_POPUP") then
 			return ya.emit("open", {})
 		end
 
 		local path = ya.quote(tostring(h.url))
 		if os.getenv("TMUX") then
-			ya.emit("shell", { "yazi-nvim " .. path, orphan = true })
+			ya.emit("shell", { "yazi-vim " .. path, orphan = true })
 		else
-			ya.emit("shell", { "nvim -- " .. path, block = true })
+			ya.emit("shell", { "vim -- " .. path, block = true })
 		end
 	end,
 }

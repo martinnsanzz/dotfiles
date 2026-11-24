@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Opens a small window to check raise-windows brings it to the front.
 
-Run it from a Ghostty tab, a tmux pane or with F5 in nvim:
+Run it from a Ghostty tab, a tmux pane or with F5 in VS Code:
     python3 ~/Projects/Claude/dotfiles/raise-windows/test-window.py
 The window should open in front of Ghostty, say "has focus" in green, and
 show the keys you type without clicking it first. Esc (or closing it) quits.

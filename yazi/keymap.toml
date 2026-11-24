@@ -1,13 +1,13 @@
-# Enter opens files in nvim instantly (see plugins/open-nvim.yazi)
+# Enter opens files in vim instantly (see plugins/open-vim.yazi)
 [[mgr.prepend_keymap]]
 on   = "<Enter>"
-run  = "plugin open-nvim"
-desc = "Enter folder or open file in nvim"
+run  = "plugin open-vim"
+desc = "Enter folder or open file in vim"
 
 [[mgr.prepend_keymap]]
 on   = "l"
-run  = "plugin open-nvim"
-desc = "Enter folder or open file in nvim"
+run  = "plugin open-vim"
+desc = "Enter folder or open file in vim"
 
 # q in the Option+e popup closes it instantly (see plugins/quit-popup.yazi)
 [[mgr.prepend_keymap]]

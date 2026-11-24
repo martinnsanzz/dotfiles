@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # The file tree popup (Option+e): yazi in the current pane's folder. Enter on
-# a file closes yazi and opens the file in nvim in the same popup; quitting
-# nvim closes the popup. Non-text files still open in their default app.
+# a file closes yazi and opens the file in vim in the same popup; quitting
+# vim closes the popup. Non-text files still open in their default app.
 
 export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
 
 chosen=$(mktemp -t tree-popup)
 
 # yazi 26 takes ~5s to hand the terminal back after choosing a file (see
-# yazi-nvim), so stop it as soon as the path is written; nvim and the popup
+# yazi-vim), so stop it as soon as the path is written; vim and the popup
 # closing reset the terminal anyway.
 (
 	while [ ! -s "$chosen" ]; do sleep 0.05; done
@@ -23,6 +23,6 @@ stty sane 2>/dev/null
 file=$(head -n 1 "$chosen")
 [ -n "$file" ] || exit 0
 case $(file -b --mime-type "$file") in
-text/* | */json | */xml | */javascript | inode/x-empty) nvim -- "$file" ;;
+text/* | */json | */xml | */javascript | inode/x-empty) vim -- "$file" ;;
 *) open "$file" ;;
 esac

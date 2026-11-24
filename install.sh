@@ -5,10 +5,6 @@ set -euo pipefail
 
 DOTFILES="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# nvim lives in its own repo, next to this one; a fresh machine clones it.
-NVIM_CONFIG="${NVIM_CONFIG:-$(dirname "$DOTFILES")/nvim-config}"
-NVIM_CONFIG_REPO="${NVIM_CONFIG_REPO:-git@github.com:martinnsanzz/nvim-config.git}"
-
 install_tools() {
 	if ! command -v brew >/dev/null 2>&1; then
 		echo "Homebrew is required: https://brew.sh" >&2
@@ -17,8 +13,11 @@ install_tools() {
 	if [ ! -d /Applications/Ghostty.app ]; then
 		brew install --cask ghostty
 	fi
-	# ripgrep, fd, lazygit and tree-sitter-cli are for nvim (search, git, syntax)
-	for pkg in tmux yazi fish btop fzf neovim ripgrep fd lazygit tree-sitter-cli; do
+	# The developer tab (Option+d) opens projects in VS Code
+	if [ ! -d "/Applications/Visual Studio Code.app" ]; then
+		brew install --cask visual-studio-code
+	fi
+	for pkg in tmux yazi fish btop fzf lazygit; do
 		brew list --formula "$pkg" >/dev/null 2>&1 || brew install "$pkg"
 	done
 }
@@ -37,24 +36,6 @@ link() {
 		echo "backup  $dest -> $backup"
 	fi
 	ln -s "$src" "$dest"
-	echo "linked  $dest"
-}
-
-# ~/.config/nvim -> the nvim-config repo (cloned first if it's missing)
-link_nvim() {
-	if [ ! -d "$NVIM_CONFIG" ]; then
-		git clone "$NVIM_CONFIG_REPO" "$NVIM_CONFIG"
-	fi
-	local dest="$HOME/.config/nvim"
-	if [ "$(readlink "$dest")" = "$NVIM_CONFIG" ]; then
-		echo "ok      $dest"
-		return
-	fi
-	if [ -e "$dest" ] || [ -L "$dest" ]; then
-		mv "$dest" "$dest.bak-$(date +%Y%m%d-%H%M%S)"
-		echo "backup  $dest"
-	fi
-	ln -s "$NVIM_CONFIG" "$dest"
 	echo "linked  $dest"
 }
 
@@ -120,11 +101,10 @@ link_configs() {
 	link yazi/yazi.toml   "$HOME/.config/yazi/yazi.toml"
 	link yazi/keymap.toml "$HOME/.config/yazi/keymap.toml"
 	link yazi/init.lua    "$HOME/.config/yazi/init.lua"
-	link yazi/plugins/open-nvim.yazi "$HOME/.config/yazi/plugins/open-nvim.yazi"
+	link yazi/plugins/open-vim.yazi "$HOME/.config/yazi/plugins/open-vim.yazi"
 	link yazi/plugins/quit-popup.yazi "$HOME/.config/yazi/plugins/quit-popup.yazi"
 	link btop/btop.conf   "$HOME/.config/btop/btop.conf"
 	link btop/themes/plain.theme "$HOME/.config/btop/themes/plain.theme"
-	link_nvim
 	for script in "$DOTFILES"/bin/*; do
 		chmod +x "$script"
 		link "bin/$(basename "$script")" "$HOME/.local/bin/$(basename "$script")"
